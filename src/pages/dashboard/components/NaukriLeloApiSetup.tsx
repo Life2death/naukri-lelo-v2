@@ -2,7 +2,7 @@
 // Providers page, or configure a custom AI/STT provider in the Dev settings.
 import { Header } from "@/components";
 
-export const PluelyApiSetup = () => {
+export const NaukriLeloApiSetup = () => {
   return (
     <div id="api-setup" className="space-y-3 -mt-2 pt-2">
       <Header

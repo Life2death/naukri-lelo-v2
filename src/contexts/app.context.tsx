@@ -144,9 +144,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     safeLocalStorage.setItem(STORAGE_KEYS.SUPPORTS_IMAGES, String(value));
   };
 
-  // Pluely API State
-  const [pluelyApiEnabled, setPluelyApiEnabledState] = useState<boolean>(
-    safeLocalStorage.getItem(STORAGE_KEYS.PLUELY_API_ENABLED) === "true"
+  // Naukri Lelo API State
+  const [naukriLeloApiEnabled, setNaukriLeloApiEnabledState] = useState<boolean>(
+    safeLocalStorage.getItem(STORAGE_KEYS.NAUKRI_LELO_API_ENABLED) === "true"
   );
 
   // Naukri Lelo is fully free — no license validation needed
@@ -268,12 +268,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
-    // Load Pluely API enabled state
-    const savedPluelyApiEnabled = safeLocalStorage.getItem(
-      STORAGE_KEYS.PLUELY_API_ENABLED
+    // Load Naukri Lelo API enabled state
+    const savedNaukriLeloApiEnabled = safeLocalStorage.getItem(
+      STORAGE_KEYS.NAUKRI_LELO_API_ENABLED
     );
-    if (savedPluelyApiEnabled !== null) {
-      setPluelyApiEnabledState(savedPluelyApiEnabled === "true");
+    if (savedNaukriLeloApiEnabled !== null) {
+      setNaukriLeloApiEnabledState(savedNaukriLeloApiEnabled === "true");
     }
 
     // Load selected audio devices
@@ -445,15 +445,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Check if the current AI provider/model supports images
   useEffect(() => {
     const checkImageSupport = async () => {
-      if (pluelyApiEnabled) {
-        // For Pluely API, check the selected model's modality
+      if (naukriLeloApiEnabled) {
+        // For Naukri Lelo API, check the selected model's modality
         try {
           const storage = await invoke<{
-            selected_pluely_model?: string;
+            selected_model?: string;
           }>("secure_storage_get");
 
-          if (storage.selected_pluely_model) {
-            const model = JSON.parse(storage.selected_pluely_model);
+          if (storage.selected_model) {
+            const model = JSON.parse(storage.selected_model);
             const hasImageSupport = model.modality?.includes("image") ?? false;
             setSupportsImages(hasImageSupport);
           } else {
@@ -478,7 +478,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
 
     checkImageSupport();
-  }, [pluelyApiEnabled, selectedAIProvider.provider]);
+  }, [naukriLeloApiEnabled, selectedAIProvider.provider]);
 
   // Sync selected AI to localStorage
   useEffect(() => {
@@ -525,7 +525,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
 
     // Update supportsImages immediately when provider changes
-    if (!pluelyApiEnabled) {
+    if (!naukriLeloApiEnabled) {
       const selectedProvider = allAiProviders.find((p) => p.id === provider);
       if (selectedProvider) {
         const hasImageSupport =
@@ -606,18 +606,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     loadData();
   };
 
-  const setPluelyApiEnabled = async (enabled: boolean) => {
-    setPluelyApiEnabledState(enabled);
-    safeLocalStorage.setItem(STORAGE_KEYS.PLUELY_API_ENABLED, String(enabled));
+  const setNaukriLeloApiEnabled = async (enabled: boolean) => {
+    setNaukriLeloApiEnabledState(enabled);
+    safeLocalStorage.setItem(STORAGE_KEYS.NAUKRI_LELO_API_ENABLED, String(enabled));
 
     if (enabled) {
       try {
         const storage = await invoke<{
-          selected_pluely_model?: string;
+          selected_model?: string;
         }>("secure_storage_get");
 
-        if (storage.selected_pluely_model) {
-          const model = JSON.parse(storage.selected_pluely_model);
+        if (storage.selected_model) {
+          const model = JSON.parse(storage.selected_model);
           const hasImageSupport = model.modality?.includes("image") ?? false;
           setSupportsImages(hasImageSupport);
         } else {
@@ -625,7 +625,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           setSupportsImages(false);
         }
       } catch (error) {
-        console.debug("Failed to check Pluely model image support:", error);
+        console.debug("Failed to check Naukri Lelo model image support:", error);
         setSupportsImages(false);
       }
     } else {
@@ -663,8 +663,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     toggleAlwaysOnTop,
     toggleAutostart,
     loadData,
-    pluelyApiEnabled,
-    setPluelyApiEnabled,
+    naukriLeloApiEnabled,
+    setNaukriLeloApiEnabled,
     hasActiveLicense,
     setHasActiveLicense,
     getActiveLicenseStatus,

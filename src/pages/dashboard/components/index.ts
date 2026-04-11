@@ -1,2 +1,2 @@
-export * from "./PluelyApiSetup";
+export * from "./NaukriLeloApiSetup";
 export * from "./Usage";

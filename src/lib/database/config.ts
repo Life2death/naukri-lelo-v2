@@ -3,7 +3,7 @@ import Database from "@tauri-apps/plugin-sql";
 /**
  * Database configuration
  */
-export const DB_NAME = "sqlite:pluely.db";
+export const DB_NAME = "sqlite:naukri-lelo.db";
 
 let dbInstance: Database | null = null;
 

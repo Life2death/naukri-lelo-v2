@@ -1,4 +1,4 @@
-import { PluelyApiSetup } from "./components";
+import { NaukriLeloApiSetup } from "./components";
 import { PageLayout } from "@/layouts";
 
 const Dashboard = () => {
@@ -7,7 +7,7 @@ const Dashboard = () => {
       title="Dashboard"
       description="Naukri Lelo — free, open-source AI interview assistant. Configure your BYOK API keys to get started."
     >
-      <PluelyApiSetup />
+      <NaukriLeloApiSetup />
     </PageLayout>
   );
 };

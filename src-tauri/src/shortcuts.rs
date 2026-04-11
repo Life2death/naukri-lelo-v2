@@ -30,25 +30,22 @@ impl Default for RegisteredShortcuts {
     }
 }
 
-pub struct LicenseState {
-    has_active_license: AtomicBool,
-}
+// LicenseState - App is free, always returns active
+pub struct LicenseState;
 
 impl Default for LicenseState {
     fn default() -> Self {
-        LicenseState {
-            has_active_license: AtomicBool::new(false),
-        }
+        LicenseState
     }
 }
 
 impl LicenseState {
     pub fn is_active(&self) -> bool {
-        self.has_active_license.load(Ordering::Relaxed)
+        true // Always active - app is free
     }
 
-    pub fn set_active(&self, active: bool) {
-        self.has_active_license.store(active, Ordering::Relaxed);
+    pub fn set_active(&self, _active: bool) {
+        // No-op - app is always active
     }
 }
 
@@ -124,17 +121,7 @@ pub fn handle_shortcut_action<R: Runtime>(app: &AppHandle<R>, action_id: &str) {
 }
 
 pub fn start_move_window<R: Runtime>(app: &AppHandle<R>, direction: &str) {
-    {
-        let license_state = app.state::<LicenseState>();
-        if !license_state.is_active() {
-            eprintln!(
-                "Ignoring move_window start for direction '{}' - license inactive",
-                direction
-            );
-            return;
-        }
-    }
-
+    // License check removed - app is free
     let state = app.state::<MoveWindowState>();
     let mut tasks = match state.tasks.lock() {
         Ok(guard) => guard,
@@ -330,18 +317,12 @@ pub fn update_shortcuts<R: Runtime>(
 
     let mut shortcuts_to_register = Vec::new();
 
-    let has_license = {
-        let license_state = app.state::<LicenseState>();
-        license_state.is_active()
-    };
+    // License check removed - app is free, all features available
 
     for (action_id, binding) in &config.bindings {
         if binding.enabled && !binding.key.is_empty() {
             if action_id == "move_window" {
-                if !has_license {
-                    eprintln!("Skipping move_window registration - license inactive");
-                    continue;
-                }
+                // Move window always available - app is free
 
                 let modifiers = binding.key.trim();
                 if modifiers.is_empty() {
@@ -501,16 +482,8 @@ pub fn validate_shortcut_key(key: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn set_license_status<R: Runtime>(app: AppHandle<R>, has_license: bool) -> Result<(), String> {
-    {
-        let state = app.state::<LicenseState>();
-        state.set_active(has_license);
-    }
-
-    if !has_license {
-        stop_all_move_windows(&app);
-    }
-
+pub fn set_license_status<R: Runtime>(_app: AppHandle<R>, _has_license: bool) -> Result<(), String> {
+    // No-op - app is always free and active
     Ok(())
 }
 
