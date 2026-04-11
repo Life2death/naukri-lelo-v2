@@ -624,3 +624,187 @@ pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
         format!("Failed to get output devices: {}", e)
     })
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit tests — pure audio-processing functions
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── calculate_audio_metrics ──────────────────────────────────────────────
+
+    #[test]
+    fn test_audio_metrics_silence() {
+        let silence = vec![0.0f32; 1024];
+        let (rms, peak) = calculate_audio_metrics(&silence);
+        assert_eq!(rms, 0.0);
+        assert_eq!(peak, 0.0);
+    }
+
+    #[test]
+    fn test_audio_metrics_dc_offset() {
+        // All samples at 0.5 → RMS = 0.5, peak = 0.5
+        let samples = vec![0.5f32; 512];
+        let (rms, peak) = calculate_audio_metrics(&samples);
+        assert!((rms - 0.5).abs() < 1e-4, "RMS should be ~0.5, got {}", rms);
+        assert!((peak - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_audio_metrics_mixed_signal() {
+        // [1.0, -1.0] alternating → peak=1.0, rms=1.0
+        let samples = vec![1.0f32, -1.0f32];
+        let (rms, peak) = calculate_audio_metrics(&samples);
+        assert!((rms - 1.0).abs() < 1e-4);
+        assert!((peak - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_audio_metrics_asymmetric_peak() {
+        // peak should reflect absolute value
+        let samples = vec![0.3f32, -0.8f32, 0.1f32];
+        let (_, peak) = calculate_audio_metrics(&samples);
+        assert!((peak - 0.8).abs() < 1e-4, "Peak should be 0.8, got {}", peak);
+    }
+
+    // ── apply_noise_gate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_noise_gate_attenuates_below_threshold() {
+        let samples = vec![0.001f32]; // well below threshold
+        let result = apply_noise_gate(&samples, 0.01);
+        // Should be attenuated (soft knee)
+        assert!(result[0].abs() < samples[0].abs());
+    }
+
+    #[test]
+    fn test_noise_gate_passes_above_threshold() {
+        let samples = vec![0.5f32]; // well above threshold
+        let result = apply_noise_gate(&samples, 0.01);
+        assert!((result[0] - 0.5).abs() < 1e-6, "Should pass unchanged above threshold");
+    }
+
+    #[test]
+    fn test_noise_gate_preserves_sign() {
+        let samples = vec![-0.001f32];
+        let result = apply_noise_gate(&samples, 0.01);
+        assert!(result[0] <= 0.0, "Negative sample should stay negative");
+    }
+
+    #[test]
+    fn test_noise_gate_empty_input() {
+        let result = apply_noise_gate(&[], 0.01);
+        assert!(result.is_empty());
+    }
+
+    // ── normalize_audio_level ────────────────────────────────────────────────
+
+    #[test]
+    fn test_normalize_empty_returns_empty() {
+        let result = normalize_audio_level(&[], 0.1);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_near_silent_returns_unchanged() {
+        // RMS < 0.001 → return as-is
+        let near_silent = vec![0.0001f32; 100];
+        let result = normalize_audio_level(&near_silent, 0.1);
+        assert_eq!(result.len(), near_silent.len());
+        // Should be essentially the same values
+        for (a, b) in near_silent.iter().zip(result.iter()) {
+            assert!((a - b).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_normalize_loud_signal_capped() {
+        // Very loud signal → gain capped at 10×, then soft-clip applied
+        let loud = vec![0.9f32; 100];
+        let result = normalize_audio_level(&loud, 0.1);
+        // All values should be ≤ 1.0 (soft clipping)
+        for s in &result {
+            assert!(s.abs() <= 1.0 + 1e-6, "Sample {} exceeds 1.0", s);
+        }
+    }
+
+    #[test]
+    fn test_normalize_quiet_signal_amplified_toward_target() {
+        // Quiet signal at RMS ≈ 0.01 should be amplified toward 0.1
+        let quiet = vec![0.01f32; 512];
+        let result = normalize_audio_level(&quiet, 0.1);
+        let sum_sq: f32 = result.iter().map(|&s| s * s).sum();
+        let result_rms = (sum_sq / result.len() as f32).sqrt();
+        // Should be much closer to 0.1 than 0.01
+        assert!(result_rms > 0.05, "Expected RMS > 0.05, got {}", result_rms);
+    }
+
+    #[test]
+    fn test_normalize_gain_capped_at_10x() {
+        // RMS = 0.005, target = 0.1 → raw gain = 20x → capped at 10x
+        let samples = vec![0.005f32; 100];
+        let result = normalize_audio_level(&samples, 0.1);
+        // With 10x cap: 0.005 * 10 = 0.05, which is < 1.0 so no soft clipping
+        assert!((result[0] - 0.05).abs() < 1e-4, "Expected ~0.05, got {}", result[0]);
+    }
+
+    // ── samples_to_wav_b64 ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_wav_b64_valid_produces_non_empty_string() {
+        let samples = vec![0.0f32; 1024];
+        let result = samples_to_wav_b64(16000, &samples);
+        assert!(result.is_ok());
+        let b64 = result.unwrap();
+        assert!(!b64.is_empty());
+        // Valid base64: only contains A-Z a-z 0-9 + / =
+        assert!(b64.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
+    }
+
+    #[test]
+    fn test_wav_b64_invalid_sample_rate_low() {
+        let samples = vec![0.0f32; 100];
+        let result = samples_to_wav_b64(7999, &samples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid sample rate"));
+    }
+
+    #[test]
+    fn test_wav_b64_invalid_sample_rate_high() {
+        let samples = vec![0.0f32; 100];
+        let result = samples_to_wav_b64(96001, &samples);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_b64_empty_buffer_returns_error() {
+        let result = samples_to_wav_b64(16000, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Empty audio buffer"));
+    }
+
+    #[test]
+    fn test_wav_b64_boundary_sample_rates() {
+        let samples = vec![0.1f32; 512];
+        // Min valid rate
+        assert!(samples_to_wav_b64(8000, &samples).is_ok());
+        // Max valid rate
+        assert!(samples_to_wav_b64(96000, &samples).is_ok());
+    }
+
+    // ── VadConfig default values ─────────────────────────────────────────────
+
+    #[test]
+    fn test_vad_config_defaults_are_sane() {
+        let config = VadConfig::default();
+        assert!(config.enabled);
+        assert!(config.hop_size > 0);
+        assert!(config.sensitivity_rms > 0.0);
+        assert!(config.peak_threshold > 0.0);
+        assert!(config.silence_chunks > 0);
+        assert!(config.min_speech_chunks > 0);
+        assert!(config.noise_gate_threshold > 0.0);
+        assert!(config.max_recording_duration_secs > 0);
+    }
+}
