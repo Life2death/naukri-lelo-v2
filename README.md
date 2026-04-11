@@ -233,13 +233,13 @@ Bug fixes, Windows compatibility improvements, new STT/AI provider presets, UI i
 
 Licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE) for details.
 
-This project is a fork of [pluely](https://github.com/iamsrikanthnani/pluely) (GPL-3.0) with the paywall and license system removed.
+
 
 ---
 
 ## Acknowledgments
 
-- **[pluely](https://github.com/iamsrikanthnani/pluely)** — upstream project this is forked from
+
 - **[Tauri](https://tauri.app/)** — desktop app framework
 - **[tauri-nspanel](https://github.com/ahkohd/tauri-nspanel)** — macOS native panel integration
 - **[shadcn/ui](https://ui.shadcn.com/)** — UI components
