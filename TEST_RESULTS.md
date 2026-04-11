@@ -31,7 +31,7 @@ Automated test cases for the Naukri Lelo application.
 | UI-001 | Dashboard loads | All components render | ✅ PASS |
 | UI-002 | Settings page loads | All settings accessible | ✅ PASS |
 | UI-003 | No license purchase prompts | Free messaging displayed | ✅ PASS |
-| UI-004 | "Naukri Lelo" branding | All "Pluely" references removed | ✅ PASS |
+| UI-004 | "Naukri Lelo" branding | All old branding references removed | ✅ PASS |
 
 ### 4. Build & Distribution Tests
 
@@ -88,7 +88,7 @@ cargo tauri dev
 **Source Code**: https://github.com/Life2death/naukri-lelo-v2
 
 **Changes Made**:
-1. All "pluely" references renamed to "naukri-lelo"
+1. All old branding references renamed to "naukri-lelo" / "Naukri Lelo"
 2. License functionality auto-passes (app is free)
 3. Secure storage keys updated
 4. Frontend components updated
