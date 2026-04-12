@@ -173,7 +173,6 @@ pub fn create_dashboard_window<R: Runtime>(
         .decorations(true)
         .inner_size(800.0, 600.0)
         .min_inner_size(800.0, 600.0)
-        .content_protected(true)
         .visible(true);
 
     let window = base_builder.build()?;
