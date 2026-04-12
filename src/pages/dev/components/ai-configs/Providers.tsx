@@ -39,8 +39,38 @@ export const Providers = ({
     return !getApiKeyValue().trim();
   };
 
+  const isOpenRouter = selectedAIProvider?.provider === "openrouter";
+
   return (
     <div className="space-y-3">
+      {isOpenRouter && isApiKeyEmpty() && (
+        <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 space-y-2">
+          <p className="text-xs font-semibold text-blue-400">
+            ✦ Recommended: OpenRouter — 100+ AI models, many completely free
+          </p>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>
+              Visit{" "}
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 underline underline-offset-2"
+              >
+                openrouter.ai/keys
+              </a>{" "}
+              and sign up for free (no credit card needed)
+            </li>
+            <li>Click <strong>Create Key</strong>, copy it</li>
+            <li>Paste it in the API Key field below</li>
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            Free models include <code className="text-blue-300">google/gemini-2.0-flash-exp:free</code>,{" "}
+            <code className="text-blue-300">meta-llama/llama-3.1-8b-instruct:free</code>, and more.
+            The model field is already pre-filled for you.
+          </p>
+        </div>
+      )}
       <div className="space-y-2">
         <Header
           title="Select AI Provider"

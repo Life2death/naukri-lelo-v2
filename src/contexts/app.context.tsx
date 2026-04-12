@@ -234,6 +234,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     );
     if (savedSelectedAi) {
       setSelectedAIProvider(JSON.parse(savedSelectedAi));
+    } else {
+      // First-time user: default to OpenRouter with a free model pre-selected
+      // Users only need to paste their free API key from openrouter.ai/keys
+      setSelectedAIProvider({
+        provider: "openrouter",
+        variables: { model: "google/gemini-2.0-flash-exp:free" },
+      });
     }
 
     // Load selected STT provider
@@ -242,6 +249,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     );
     if (savedSelectedStt) {
       setSelectedSttProvider(JSON.parse(savedSelectedStt));
+    } else {
+      // First-time user: default to Groq (free tier, no credit card required)
+      // Users only need to paste their free API key from console.groq.com
+      setSelectedSttProvider({
+        provider: "groq",
+        variables: { model: "whisper-large-v3-turbo" },
+      });
     }
 
     // Load customizable state

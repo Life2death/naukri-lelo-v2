@@ -39,8 +39,36 @@ export const Providers = ({
     return !getApiKeyValue().trim();
   };
 
+  const isGroq = selectedSttProvider?.provider === "groq";
+
   return (
     <div className="space-y-3">
+      {isGroq && isApiKeyEmpty() && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-2">
+          <p className="text-xs font-semibold text-green-400">
+            ✦ Recommended: Groq Whisper — ultra-fast transcription, free tier available
+          </p>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>
+              Visit{" "}
+              <a
+                href="https://console.groq.com/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-green-400 underline underline-offset-2"
+              >
+                console.groq.com/keys
+              </a>{" "}
+              and sign up for free (no credit card needed)
+            </li>
+            <li>Click <strong>Create API Key</strong>, copy it</li>
+            <li>Paste it in the API Key field below</li>
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            Model is pre-filled as <code className="text-green-300">whisper-large-v3-turbo</code> — the fastest option on Groq's free tier.
+          </p>
+        </div>
+      )}
       <div className="space-y-2">
         <Header
           title="Select STT Provider"

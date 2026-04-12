@@ -1,5 +1,18 @@
 export const AI_PROVIDERS = [
   {
+    // Recommended: supports 100+ free models, no billing required for free tier
+    id: "openrouter",
+    curl: `curl https://openrouter.ai/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {{API_KEY}}" \
+  -d '{
+    "model": "{{MODEL}}",
+    "messages": [{"role": "system", "content": "{{SYSTEM_PROMPT}}"}, {"role": "user", "content": [{"type": "text", "text": "{{TEXT}}"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,{{IMAGE}}"}}]}]
+  }'`,
+    responseContentPath: "choices[0].message.content",
+    streaming: true,
+  },
+  {
     id: "openai",
     curl: `curl https://api.openai.com/v1/chat/completions \\
   -H "Content-Type: application/json" \\
@@ -99,18 +112,6 @@ export const AI_PROVIDERS = [
     curl: `curl -X POST https://api.perplexity.ai/chat/completions \\
   -H "Authorization: Bearer {{API_KEY}}" \\
   -H "Content-Type: application/json" \\
-  -d '{
-    "model": "{{MODEL}}",
-    "messages": [{"role": "system", "content": "{{SYSTEM_PROMPT}}"}, {"role": "user", "content": [{"type": "text", "text": "{{TEXT}}"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,{{IMAGE}}"}}]}]
-  }'`,
-    responseContentPath: "choices[0].message.content",
-    streaming: true,
-  },
-  {
-    id: "openrouter",
-    curl: `  curl https://openrouter.ai/api/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer {{API_KEY}}" \
   -d '{
     "model": "{{MODEL}}",
     "messages": [{"role": "system", "content": "{{SYSTEM_PROMPT}}"}, {"role": "user", "content": [{"type": "text", "text": "{{TEXT}}"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,{{IMAGE}}"}}]}]
