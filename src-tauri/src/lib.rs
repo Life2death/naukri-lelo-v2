@@ -31,14 +31,23 @@ fn get_app_version() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Startup diagnostic: write to temp file so we can confirm the binary is executing
+    // Panic hook: if the app crashes, write the reason to a file before exiting
+    std::panic::set_hook(Box::new(|panic_info| {
+        let msg = format!(
+            "Naukri Lelo crashed at {:?}\n\n{}\n\nPlease report at:\nhttps://github.com/Life2death/naukri-lelo-v2/issues",
+            std::time::SystemTime::now(),
+            panic_info
+        );
+        let _ = std::fs::write(
+            std::env::temp_dir().join("naukri-lelo-crash.txt"),
+            &msg,
+        );
+    }));
+
+    // Startup diagnostic: step 1 — binary is executing
     let _ = std::fs::write(
         std::env::temp_dir().join("naukri-lelo-startup.txt"),
-        format!(
-            "Naukri Lelo v{} started at {:?}",
-            env!("CARGO_PKG_VERSION"),
-            std::time::SystemTime::now()
-        ),
+        format!("step1: Naukri Lelo v{} binary started", env!("CARGO_PKG_VERSION")),
     );
 
     // Get PostHog API key
@@ -281,6 +290,12 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_macos_permissions::init());
     }
+
+    // Startup diagnostic: step 2 — about to start Tauri event loop
+    let _ = std::fs::write(
+        std::env::temp_dir().join("naukri-lelo-startup.txt"),
+        "step2: about to call builder.run() — if crash.txt appears, Tauri init failed",
+    );
 
     builder
         .run(tauri::generate_context!())
