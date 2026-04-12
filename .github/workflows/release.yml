@@ -15,6 +15,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# Required for tauri-action to create GitHub releases and upload assets
+permissions:
+  contents: write
+
 jobs:
   # ── Linux build ───────────────────────────────────────────────────────────────
   build-linux:
