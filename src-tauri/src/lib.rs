@@ -31,6 +31,16 @@ fn get_app_version() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Startup diagnostic: write to temp file so we can confirm the binary is executing
+    let _ = std::fs::write(
+        std::env::temp_dir().join("naukri-lelo-startup.txt"),
+        format!(
+            "Naukri Lelo v{} started at {:?}",
+            env!("CARGO_PKG_VERSION"),
+            std::time::SystemTime::now()
+        ),
+    );
+
     // Get PostHog API key
     let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
     let mut builder = tauri::Builder::default()
@@ -62,15 +72,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_keychain::init())
-        .plugin(tauri_plugin_shell::init()) // Add shell plugin
+        .plugin(tauri_plugin_shell::init())
         .plugin(posthog_init(PostHogConfig {
             api_key: posthog_api_key,
             options: Some(PostHogOptions {
-                // disable session recording
                 disable_session_recording: Some(true),
-                // disable pageview
                 capture_pageview: Some(false),
-                // disable pageleave
                 capture_pageleave: Some(false),
                 ..Default::default()
             }),
@@ -128,15 +135,73 @@ pub fn run() {
             speaker::get_output_devices,
         ])
         .setup(|app| {
-            // Setup main window positioning
-            window::setup_main_window(app).expect("Failed to setup main window");
+            // Non-fatal: if window positioning fails, continue anyway
+            if let Err(e) = window::setup_main_window(app) {
+                eprintln!("Warning: Failed to position main window: {}", e);
+            }
+
             #[cfg(target_os = "macos")]
             init(app.app_handle());
+
+            // Pre-create dashboard window so it's ready immediately
             let app_handle = app.handle();
             if app_handle.get_webview_window("dashboard").is_none() {
                 if let Err(e) = window::create_dashboard_window(&app_handle) {
-                    eprintln!("Failed to pre-create dashboard window on startup: {}", e);
+                    eprintln!("Failed to pre-create dashboard window: {}", e);
                 }
+            }
+
+            // System tray: gives the user a reliable way to open the dashboard
+            // and quit the app even when all windows are hidden
+            {
+                use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+
+                let open_item = MenuItem::with_id(
+                    app,
+                    "open_dashboard",
+                    "Open Dashboard",
+                    true,
+                    None::<&str>,
+                )?;
+                let quit_item =
+                    MenuItem::with_id(app, "quit", "Quit Naukri Lelo", true, None::<&str>)?;
+                let sep = PredefinedMenuItem::separator(app)?;
+                let menu = Menu::with_items(app, &[&open_item, &sep, &quit_item])?;
+
+                let tray = tauri::tray::TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .menu(&menu)
+                    .menu_on_left_click(false)
+                    .tooltip("Naukri Lelo — click to open dashboard")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "open_dashboard" => {
+                            if let Some(w) = app.get_webview_window("dashboard") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("dashboard") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+
+                // Keep the tray icon alive for the full app lifetime
+                std::mem::forget(tray);
             }
 
             #[cfg(desktop)]
@@ -152,58 +217,59 @@ pub fn run() {
                 }
             }
 
-            // Initialize global shortcut plugin with centralized handler
-            app.handle()
-                .plugin(
-                    tauri_plugin_global_shortcut::Builder::new()
-                        .with_handler(move |app, shortcut, event| {
-                            use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+            // Non-fatal: if global shortcut plugin fails, app still works
+            if let Err(e) = app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(move |app, shortcut, event| {
+                        use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
-                            let action_id = {
-                                let state = app.state::<shortcuts::RegisteredShortcuts>();
-                                let registered = match state.shortcuts.lock() {
-                                    Ok(guard) => guard,
-                                    Err(poisoned) => {
-                                        eprintln!("Mutex poisoned in handler, recovering...");
-                                        poisoned.into_inner()
-                                    }
-                                };
-
-                                registered.iter().find_map(|(action_id, shortcut_str)| {
-                                    if let Ok(s) = shortcut_str.parse::<Shortcut>() {
-                                        if &s == shortcut {
-                                            return Some(action_id.clone());
-                                        }
-                                    }
-                                    None
-                                })
+                        let action_id = {
+                            let state = app.state::<shortcuts::RegisteredShortcuts>();
+                            let registered = match state.shortcuts.lock() {
+                                Ok(guard) => guard,
+                                Err(poisoned) => {
+                                    eprintln!("Mutex poisoned in handler, recovering...");
+                                    poisoned.into_inner()
+                                }
                             };
 
-                            if let Some(action_id) = action_id {
-                                match event.state() {
-                                    ShortcutState::Pressed => {
-                                        if let Some(direction) =
-                                            action_id.strip_prefix("move_window_")
-                                        {
-                                            shortcuts::start_move_window(app, direction);
-                                        } else {
-                                            eprintln!("Shortcut triggered: {}", action_id);
-                                            shortcuts::handle_shortcut_action(app, &action_id);
-                                        }
+                            registered.iter().find_map(|(action_id, shortcut_str)| {
+                                if let Ok(s) = shortcut_str.parse::<Shortcut>() {
+                                    if &s == shortcut {
+                                        return Some(action_id.clone());
                                     }
-                                    ShortcutState::Released => {
-                                        if let Some(direction) =
-                                            action_id.strip_prefix("move_window_")
-                                        {
-                                            shortcuts::stop_move_window(app, direction);
-                                        }
+                                }
+                                None
+                            })
+                        };
+
+                        if let Some(action_id) = action_id {
+                            match event.state() {
+                                ShortcutState::Pressed => {
+                                    if let Some(direction) =
+                                        action_id.strip_prefix("move_window_")
+                                    {
+                                        shortcuts::start_move_window(app, direction);
+                                    } else {
+                                        eprintln!("Shortcut triggered: {}", action_id);
+                                        shortcuts::handle_shortcut_action(app, &action_id);
+                                    }
+                                }
+                                ShortcutState::Released => {
+                                    if let Some(direction) =
+                                        action_id.strip_prefix("move_window_")
+                                    {
+                                        shortcuts::stop_move_window(app, direction);
                                     }
                                 }
                             }
-                        })
-                        .build(),
-                )
-                .expect("Failed to initialize global shortcut plugin");
+                        }
+                    })
+                    .build(),
+            ) {
+                eprintln!("Warning: Failed to initialize global shortcut plugin: {}", e);
+            }
+
             if let Err(e) = shortcuts::setup_global_shortcuts(app.handle()) {
                 eprintln!("Failed to setup global shortcuts: {}", e);
             }
@@ -239,7 +305,6 @@ fn init(app_handle: &AppHandle) {
         match delegate_name.as_str() {
             "window_did_become_key" => {
                 let app_name = handle.package_info().name.to_owned();
-
                 println!("[info]: {:?} panel becomes key window!", app_name);
             }
             "window_did_resign_key" => {
@@ -249,7 +314,6 @@ fn init(app_handle: &AppHandle) {
         }
     }));
 
-    // Set the window to float level
     #[allow(non_upper_case_globals)]
     const NSFloatWindowLevel: i32 = 4;
     panel.set_level(NSFloatWindowLevel);

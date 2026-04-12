@@ -24,7 +24,6 @@
         "skipTaskbar": true,
         "visible": true,
         "center": false,
-        "contentProtected": true,
         "focus": false,
         "acceptFirstMouse": true,
         "shadow": false
