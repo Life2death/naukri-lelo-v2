@@ -35,6 +35,17 @@ pub fn run() {
     let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
     let mut builder = tauri::Builder::default()
         .plugin(
+            tauri_plugin_log::Builder::default()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("naukri-lelo".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stderr),
+                ])
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
+        .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:naukri-lelo.db", db::migrations())
                 .build(),

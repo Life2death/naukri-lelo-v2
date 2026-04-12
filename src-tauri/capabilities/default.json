@@ -8,6 +8,7 @@
     "core:default",
     "opener:default",
     "updater:default",
+    "log:default",
     "macos-permissions:default",
     "keychain:default",
     "keychain:allow-get-item",
