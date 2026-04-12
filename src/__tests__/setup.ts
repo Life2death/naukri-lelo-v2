@@ -32,7 +32,7 @@ class MockFileReader {
   onloadend: (() => void) | null = null;
   onerror: ((e: any) => void) | null = null;
 
-  readAsDataURL(blob: Blob) {
+  readAsDataURL(_blob: Blob) {
     setTimeout(() => {
       this.result = `data:audio/wav;base64,SGVsbG9Xb3JsZA==`;
       this.onloadend?.();
