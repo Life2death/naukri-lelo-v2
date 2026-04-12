@@ -39,9 +39,13 @@ jobs:
             patchelf \
             libpulse-dev \
             libdbus-1-dev \
-            libxdo-dev \
+            libasound2-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxcomposite-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
+            libxdo-dev \
             rpm
 
       - name: Set up Node.js
@@ -61,7 +65,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workdir: src-tauri
+          workspaces: src-tauri -> target
 
       - name: Build Tauri app – Linux
         uses: tauri-apps/tauri-action@v0
@@ -114,7 +118,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workdir: src-tauri
+          workspaces: src-tauri -> target
 
       - name: Build Tauri app – Windows
         uses: tauri-apps/tauri-action@v0
@@ -155,7 +159,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workdir: src-tauri
+          workspaces: src-tauri -> target
 
       - name: Build Tauri app – macOS Universal
         uses: tauri-apps/tauri-action@v0

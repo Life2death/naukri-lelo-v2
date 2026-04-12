@@ -52,7 +52,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libpulse-dev \
-            libdbus-1-dev
+            libdbus-1-dev \
+            libasound2-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxcomposite-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxdo-dev
 
       - name: Set up Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +69,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workdir: src-tauri
+          workspaces: src-tauri -> target
 
       - name: Cargo check
         working-directory: src-tauri
