@@ -139,9 +139,12 @@ jobs:
           prerelease: false
           args: --target x86_64-pc-windows-msvc
 
-  # ── macOS build ───────────────────────────────────────────────────────────────
+  # ── macOS build ─────────────────────────────────────── (coming soon) ─────────
+  # macOS build is temporarily disabled. Re-enable by removing `if: false`.
+  # Requires: Apple Developer account ($99/yr), cidre macOS SDK setup.
   build-macos:
     name: macOS (.dmg universal)
+    if: false
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
