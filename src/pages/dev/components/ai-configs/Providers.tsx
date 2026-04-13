@@ -65,8 +65,8 @@ export const Providers = ({
             <li>Paste it in the API Key field below</li>
           </ol>
           <p className="text-xs text-muted-foreground">
-            Free models include <code className="text-blue-300">google/gemini-2.0-flash-exp:free</code>,{" "}
-            <code className="text-blue-300">meta-llama/llama-3.1-8b-instruct:free</code>, and more.
+            Free models include <code className="text-blue-300">meta-llama/llama-3.3-70b-instruct:free</code>,{" "}
+            <code className="text-blue-300">mistralai/mistral-7b-instruct:free</code>, and more.
             The model field is already pre-filled for you.
           </p>
         </div>

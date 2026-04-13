@@ -233,13 +233,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       STORAGE_KEYS.SELECTED_AI_PROVIDER
     );
     if (savedSelectedAi) {
-      setSelectedAIProvider(JSON.parse(savedSelectedAi));
+      const parsed = JSON.parse(savedSelectedAi);
+      // Migrate away from removed model — openrouter retired gemini-2.0-flash-exp:free
+      if (parsed?.variables?.model === "google/gemini-2.0-flash-exp:free") {
+        parsed.variables.model = "meta-llama/llama-3.3-70b-instruct:free";
+      }
+      setSelectedAIProvider(parsed);
     } else {
       // First-time user: default to OpenRouter with a free model pre-selected
       // Users only need to paste their free API key from openrouter.ai/keys
       setSelectedAIProvider({
         provider: "openrouter",
-        variables: { model: "google/gemini-2.0-flash-exp:free" },
+        variables: { model: "meta-llama/llama-3.3-70b-instruct:free" },
       });
     }
 
