@@ -1,7 +1,7 @@
 import { Button, Header, Input, Selection, TextInput } from "@/components";
 import { UseSettingsReturn } from "@/types";
 import curl2Json, { ResultJSON } from "@bany/curl-to-json";
-import { KeyIcon, TrashIcon } from "lucide-react";
+import { ExternalLinkIcon, KeyIcon, TrashIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export const Providers = ({
@@ -216,19 +216,32 @@ export const Providers = ({
 
             return (
               <div className="space-y-1" key={variable?.key}>
-                <Header
-                  title={variable?.value || ""}
-                  description={`add your preferred ${variable?.key?.replace(
-                    /_/g,
-                    " "
-                  )} for ${
-                    allAiProviders?.find(
-                      (p) => p?.id === selectedAIProvider?.provider
-                    )?.isCustom
-                      ? "Custom Provider"
-                      : selectedAIProvider?.provider
-                  }`}
-                />
+                <div className="flex items-start justify-between gap-2">
+                  <Header
+                    title={variable?.value || ""}
+                    description={`add your preferred ${variable?.key?.replace(
+                      /_/g,
+                      " "
+                    )} for ${
+                      allAiProviders?.find(
+                        (p) => p?.id === selectedAIProvider?.provider
+                      )?.isCustom
+                        ? "Custom Provider"
+                        : selectedAIProvider?.provider
+                    }`}
+                  />
+                  {isOpenRouter && variable.key === "model" && (
+                    <a
+                      href="https://openrouter.ai/models?q=:free"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors shrink-0 mt-0.5"
+                    >
+                      <ExternalLinkIcon className="h-3 w-3" />
+                      Browse free models
+                    </a>
+                  )}
+                </div>
                 <TextInput
                   placeholder={`Enter ${
                     allAiProviders?.find(
