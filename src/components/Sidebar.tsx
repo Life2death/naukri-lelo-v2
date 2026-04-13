@@ -1,4 +1,3 @@
-import { SparklesIcon } from "lucide-react";
 import { Button } from "@/components";
 import { cn } from "@/lib/utils";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -18,8 +17,10 @@ export const Sidebar = () => {
         onClick={() => navigate("/dashboard")}
         className="flex h-16 items-center px-4 pt-10 gap-1.5"
       >
-        <div className="flex size-6 lg:size-7 items-center justify-center rounded-lg bg-primary">
-          <SparklesIcon className="size-4 lg:size-5 text-primary-foreground transition-all duration-300" />
+        <div className="flex size-6 lg:size-7 items-center justify-center rounded-lg bg-primary shrink-0">
+          <span className="text-xs lg:text-sm font-black text-primary-foreground leading-none tracking-tight select-none">
+            N
+          </span>
         </div>
         <div className="flex flex-col">
           <h1 className="text-xs lg:text-md font-semibold text-foreground transition-all duration-300">

@@ -184,11 +184,21 @@ pub fn create_dashboard_window<R: Runtime>(
 }
 
 /// Sets up the close event handler for the dashboard window.
-/// Dashboard closes normally — app stays alive via the system tray.
-/// User reopens it by clicking the tray icon.
-fn setup_dashboard_close_handler<R: Runtime>(_window: &WebviewWindow<R>) {
-    // No-op: closing the dashboard just closes it.
-    // The app continues running in the system tray (prevent_exit in lib.rs).
+/// Intercepting CloseRequested and hiding is critical — destroying the window
+/// and recreating it races with WebView2 initialisation on Windows, causing
+/// the app to appear frozen.  Hiding is instant and the window stays alive in
+/// the process, so subsequent show() calls are reliable.
+fn setup_dashboard_close_handler<R: Runtime>(window: &WebviewWindow<R>) {
+    let window_clone = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // Prevent Tauri from destroying the webview window.
+            // The window is merely hidden; the app continues running in the
+            // system tray and the user can reopen it any time.
+            api.prevent_close();
+            let _ = window_clone.hide();
+        }
+    });
 }
 
 /// Shows the dashboard window and brings it to focus

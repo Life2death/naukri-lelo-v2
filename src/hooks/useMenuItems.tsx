@@ -9,15 +9,13 @@ import {
   HomeIcon,
   PowerIcon,
   MailIcon,
-  CoffeeIcon,
-  GlobeIcon,
   BugIcon,
   MessageSquareTextIcon,
   UserCircle2Icon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "@/contexts";
-import { XIcon, GithubIcon } from "@/components";
+import { GithubIcon } from "@/components";
 
 export const useMenuItems = () => {
   const { hasActiveLicense } = useApp();
@@ -111,24 +109,9 @@ export const useMenuItems = () => {
     link: string;
   }[] = [
     {
-      title: "Website",
-      icon: GlobeIcon,
-      link: "https://github.com/Life2death/naukri-lelo",
-    },
-    {
-      title: "Github",
+      title: "GitHub",
       icon: GithubIcon,
       link: "https://github.com/Life2death/naukri-lelo",
-    },
-    {
-      title: "Buy Me a Coffee",
-      icon: CoffeeIcon,
-      link: "https://buymeacoffee.com/srikanthnani",
-    },
-    {
-      title: "Follow on X",
-      icon: XIcon,
-      link: "https://x.com/srikanthnani",
     },
   ];
 

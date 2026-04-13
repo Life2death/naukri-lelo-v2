@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{thread, time::Duration};
 use tauri::Emitter;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use xcap::Monitor;
@@ -141,8 +140,10 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
                     format!("Failed to create overlay window {}: {}", idx, e)
                 })?;
 
-        // Wait a short moment for content to load before showing
-        thread::sleep(Duration::from_millis(100));
+        // Wait a short moment for content to load before showing.
+        // Using tokio::time::sleep (not thread::sleep) so we don't block the
+        // Tokio executor thread, which would freeze all other async commands.
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         overlay.show().ok();
         overlay.set_always_on_top(true).ok();
@@ -155,8 +156,8 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
-    // Give a moment for all windows to settle, then focus primary again
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Give a moment for all windows to settle, then focus primary again.
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     for (idx, monitor) in capture_monitors.iter().enumerate() {
         if monitor.is_primary() {
