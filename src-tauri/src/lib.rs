@@ -290,15 +290,28 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_macos_permissions::init());
     }
 
-    // Startup diagnostic: step 2 — about to start Tauri event loop
+    // Startup diagnostic: step 2 — about to build + start event loop
     let _ = std::fs::write(
         std::env::temp_dir().join("naukri-lelo-startup.txt"),
-        "step2: about to call builder.run() — if crash.txt appears, Tauri init failed",
+        "step2: building app — if crash.txt appears, Tauri init failed",
     );
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error building tauri application");
+
+    let _ = std::fs::write(
+        std::env::temp_dir().join("naukri-lelo-startup.txt"),
+        "step3: running event loop — app started successfully",
+    );
+
+    // Run with ExitRequested handler: closing all windows does NOT exit the app.
+    // The app stays alive in the system tray. Only tray → Quit actually exits.
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            api.prevent_exit();
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]

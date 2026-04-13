@@ -238,6 +238,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (parsed?.variables?.model === "google/gemini-2.0-flash-exp:free") {
         parsed.variables.model = "meta-llama/llama-3.3-70b-instruct:free";
       }
+      // Guard: openrouter with no model set causes "Missing required variable: model"
+      if (parsed?.provider === "openrouter" && !parsed?.variables?.model) {
+        if (!parsed.variables) parsed.variables = {};
+        parsed.variables.model = "meta-llama/llama-3.3-70b-instruct:free";
+      }
       setSelectedAIProvider(parsed);
     } else {
       // First-time user: default to OpenRouter with a free model pre-selected
