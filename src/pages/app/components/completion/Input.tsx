@@ -154,9 +154,9 @@ export const Input = ({
           </div>
 
           <ScrollArea ref={scrollAreaRef} className="h-[calc(100vh-7rem)]">
-            <div className="p-4">
+            <div className="p-4 overflow-x-hidden">
               {error && (
-                <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+                <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive break-words overflow-x-hidden">
                   <strong>Error:</strong> {error}
                 </div>
               )}
