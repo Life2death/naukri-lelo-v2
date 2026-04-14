@@ -105,14 +105,49 @@ export const useCompletion = () => {
     screenshotConfigRef.current = screenshotConfiguration;
   }, [screenshotConfiguration]);
 
+  // Track whether profile is currently being loaded to avoid duplicate loads
+  const profileLoadingRef = useRef(false);
+
+  /** Ensures profile context is populated, loading it on-demand if needed.
+   *  Called from submit() so a question asked immediately after selecting a
+   *  profile doesn't race against the background useEffect load. */
+  const ensureProfileContext = useCallback(async () => {
+    if (!activeProfileId) return;
+    // Already populated — nothing to do
+    if (profileContextRef.current) return;
+    // Already loading — wait for it
+    if (profileLoadingRef.current) {
+      // Poll up to 3 s for the background load to finish
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (profileContextRef.current) return;
+      }
+      return;
+    }
+    profileLoadingRef.current = true;
+    try {
+      const profile = await getProfileById(activeProfileId);
+      if (!profile) return;
+      activeProfileRef.current = profile;
+      const refTexts = await loadProfileRefConvTexts(activeProfileId);
+      profileContextRef.current = buildProfileKnowledgeContext(profile, refTexts);
+    } catch {
+      /* silently ignore — fall back to base system prompt */
+    } finally {
+      profileLoadingRef.current = false;
+    }
+  }, [activeProfileId]);
+
   // Reload the active profile and build its knowledge context whenever activeProfileId changes
   useEffect(() => {
     if (!activeProfileId) {
       activeProfileRef.current = null;
       profileContextRef.current = "";
+      profileLoadingRef.current = false;
       return;
     }
     let cancelled = false;
+    profileLoadingRef.current = true;
     (async () => {
       try {
         const profile = await getProfileById(activeProfileId);
@@ -124,9 +159,11 @@ export const useCompletion = () => {
       } catch {
         activeProfileRef.current = null;
         profileContextRef.current = "";
+      } finally {
+        if (!cancelled) profileLoadingRef.current = false;
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; profileLoadingRef.current = false; };
   }, [activeProfileId]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -187,6 +224,12 @@ export const useCompletion = () => {
           input: speechText,
         }));
       }
+
+      // Ensure the profile knowledge context is loaded before building the prompt.
+      // This guards against the race condition where the user asks a question
+      // immediately after selecting a profile (before the background useEffect
+      // async load has completed).
+      await ensureProfileContext();
 
       // Generate unique request ID
       const requestId = generateRequestId();
@@ -331,6 +374,7 @@ export const useCompletion = () => {
       systemPrompt,
       state.conversationHistory,
       buildEffectiveSystemPrompt,
+      ensureProfileContext,
     ]
   );
 

@@ -1,66 +1,94 @@
 import { InterviewProfile } from "@/types";
 import { getConversationById } from "@/lib/database/chat-history.action";
 
-// Maximum characters to include in the injected context to avoid token overload
-const MAX_CONTEXT_CHARS = 8000;
-const MAX_RESUME_CHARS = 3000;
-const MAX_GOALS_CHARS = 2000;
-const MAX_DOC_CHARS = 800;
-const MAX_REF_CONV_CHARS = 1500;
+// Generous limits — modern LLMs handle 100k+ tokens; 24k chars ≈ 6k tokens, well within range
+const MAX_CONTEXT_CHARS = 24000;
+const MAX_RESUME_CHARS = 6000;
+const MAX_GOALS_CHARS = 3000;
+const MAX_DOC_CHARS = 6000; // enough for 30–50 Q&As per document
+const MAX_REF_CONV_CHARS = 2000;
 const MAX_REF_CONVS = 3;
 
 /**
  * Builds a knowledge-hub system prompt prefix from the active interview profile.
- * Includes resume, custom documents, and any saved reference conversations.
+ *
+ * The returned string is prepended to whatever system prompt the user has configured
+ * so that EVERY AI call in the overlay uses the candidate's resume, documents, and
+ * reference conversations as grounding data.
+ *
+ * The opening persona block is critical: it instructs the AI to respond in the
+ * first person AS the candidate, not as a generic assistant. Without this,
+ * Claude and most LLMs will ignore the profile data and stay in assistant mode.
  */
 export function buildProfileKnowledgeContext(
   profile: InterviewProfile,
   refConvTexts?: string[]
 ): string {
-  const parts: string[] = [
-    `## Active Interview Profile: ${profile.name}`,
-    "Use the following information as context when answering interview-related questions. Reference this profile to give tailored, specific answers.",
-    "",
-  ];
+  const parts: string[] = [];
 
-  if (profile.goals.trim()) {
-    parts.push("### Target Role / Job Description");
+  // ── Persona instruction ──────────────────────────────────────────────────
+  // This is the most important block. Without an explicit role instruction,
+  // Claude will respond as "an AI assistant" even when profile data is present.
+  parts.push(`=== INTERVIEW ASSISTANT MODE ===`);
+  parts.push(
+    `You are acting as a job candidate named "${profile.name}" during a live job interview. ` +
+      `Answer EVERY question in the first person as ${profile.name}. ` +
+      `Use the resume, job description, documents, and preparation notes below to give ` +
+      `specific, accurate, personalised answers grounded in real experiences and skills. ` +
+      `Do NOT present yourself as an AI. Do NOT say "I'm Claude" or "As an AI". ` +
+      `You ARE ${profile.name} for this entire conversation. ` +
+      `When asked "tell me about yourself", introduce yourself as ${profile.name} using your background from the resume below.`
+  );
+  parts.push(``);
+
+  // ── Target role / job description ────────────────────────────────────────
+  if (profile.goals && profile.goals.trim()) {
+    parts.push(`--- Target Role / Job Description ---`);
     parts.push(profile.goals.trim().substring(0, MAX_GOALS_CHARS));
-    parts.push("");
+    parts.push(``);
   }
 
-  if (profile.resumeText.trim()) {
+  // ── Resume ───────────────────────────────────────────────────────────────
+  if (profile.resumeText && profile.resumeText.trim()) {
     const label = profile.resumeFileName
-      ? `### Resume (${profile.resumeFileName})`
-      : "### Resume";
+      ? `--- Resume (${profile.resumeFileName}) ---`
+      : `--- Resume ---`;
     parts.push(label);
     parts.push(profile.resumeText.trim().substring(0, MAX_RESUME_CHARS));
-    parts.push("");
+    parts.push(``);
   }
 
-  if (profile.documents.length > 0) {
-    parts.push("### Reference Documents");
+  // ── Custom documents (Q&A, interview prep, etc.) ─────────────────────────
+  if (profile.documents && profile.documents.length > 0) {
+    parts.push(`--- Preparation Documents ---`);
     for (const doc of profile.documents) {
-      parts.push(`**${doc.name}:**`);
+      parts.push(`[${doc.name}]`);
       parts.push(doc.text.trim().substring(0, MAX_DOC_CHARS));
-      parts.push("");
+      parts.push(``);
     }
   }
 
+  // ── Reference conversations from previous prep sessions ──────────────────
   if (refConvTexts && refConvTexts.length > 0) {
-    parts.push("### Previous Interview Prep (Reference Knowledge)");
-    parts.push("The following are insights from previous interview prep sessions for this profile. Use them to provide consistent, well-informed answers:");
+    parts.push(`--- Previous Interview Prep (Reference Knowledge) ---`);
+    parts.push(
+      `Use the following answers from earlier prep sessions for consistency and depth:`
+    );
     for (const text of refConvTexts.slice(0, MAX_REF_CONVS)) {
       parts.push(text.substring(0, MAX_REF_CONV_CHARS));
-      parts.push("");
+      parts.push(``);
     }
   }
 
-  parts.push("---");
+  parts.push(`=== END OF CANDIDATE PROFILE ===`);
+  parts.push(``);
 
   const context = parts.join("\n");
+
+  // Hard cap: if still over limit, truncate with a note
   return context.length > MAX_CONTEXT_CHARS
-    ? context.substring(0, MAX_CONTEXT_CHARS) + "\n[...profile context truncated to fit limits...]"
+    ? context.substring(0, MAX_CONTEXT_CHARS) +
+        "\n[...profile context truncated — consider splitting large documents into smaller files...]"
     : context;
 }
 
@@ -95,9 +123,11 @@ export function addProfileRefConvId(profileId: string, convId: string): void {
 
 /**
  * Loads reference conversations from SQLite for the given profile and returns
- * a condensed text summary (only assistant messages) suitable for context injection.
+ * a condensed text (assistant messages only) suitable for context injection.
  */
-export async function loadProfileRefConvTexts(profileId: string): Promise<string[]> {
+export async function loadProfileRefConvTexts(
+  profileId: string
+): Promise<string[]> {
   const ids = getProfileRefConvIds(profileId);
   if (ids.length === 0) return [];
 
@@ -106,7 +136,6 @@ export async function loadProfileRefConvTexts(profileId: string): Promise<string
     try {
       const conv = await getConversationById(id);
       if (!conv) continue;
-      // Condense: title + assistant messages only
       const assistantLines = conv.messages
         .filter((m) => m.role === "assistant" && m.content.trim())
         .map((m) => m.content.trim())
