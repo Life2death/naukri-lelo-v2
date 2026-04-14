@@ -160,7 +160,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
       return <AlertCircleIcon className="text-red-500" />;
     if (isProcessing) return <LoaderIcon className="animate-spin" />;
     if (capturing)
-      return <AudioLinesIcon className="text-green-500 animate-pulse" />;
+      return <AudioLinesIcon className="animate-pulse" />;
     return <HeadphonesIcon />;
   };
 
@@ -185,11 +185,12 @@ export const SystemAudio = (props: useSystemAudioType) => {
       <PopoverTrigger asChild>
         <Button
           size="icon"
+          variant="default"
           title={getButtonTitle()}
           onClick={handleToggleCapture}
           className={cn(
-            capturing && "bg-green-50 hover:bg-green-100",
-            error && "bg-red-100 hover:bg-red-200"
+            capturing && "bg-green-500 hover:bg-green-600 text-white border-0",
+            error && !capturing && "bg-red-500 hover:bg-red-600 text-white border-0"
           )}
         >
           {getButtonIcon()}

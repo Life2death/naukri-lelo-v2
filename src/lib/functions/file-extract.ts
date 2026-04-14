@@ -1,64 +1,43 @@
 import mammoth from "mammoth";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Point the worker at the bundled worker file so Vite can serve it
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).href;
 
 /**
- * Extracts plain text from a PDF file using BT/ET text block parsing.
- * Pure JS — no pdfjs-dist dependency needed.
+ * Extracts plain text from a PDF file using pdfjs-dist.
+ * Handles compressed streams, CIDFont encodings, and all modern PDF variants.
  */
 async function extractTextFromPDF(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
 
-  // Convert binary to Latin-1 string for regex matching
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const pdf = await loadingTask.promise;
 
-  const textParts: string[] = [];
+  const pageTexts: string[] = [];
 
-  // Find all BT...ET blocks (text blocks in PDF)
-  const btEtRegex = /BT([\s\S]*?)ET/g;
-  let blockMatch: RegExpExecArray | null;
-
-  while ((blockMatch = btEtRegex.exec(binary)) !== null) {
-    const block = blockMatch[1];
-
-    // Extract text from Tj operators: (text) Tj
-    const tjRegex = /\(([^)]*)\)\s*Tj/g;
-    let m: RegExpExecArray | null;
-    while ((m = tjRegex.exec(block)) !== null) {
-      textParts.push(decodePdfString(m[1]));
-    }
-
-    // Extract text from TJ operators: [(text) spacing (text)] TJ
-    const tjArrayRegex = /\[(.*?)\]\s*TJ/g;
-    while ((m = tjArrayRegex.exec(block)) !== null) {
-      const inner = m[1];
-      const innerTj = /\(([^)]*)\)/g;
-      let im: RegExpExecArray | null;
-      while ((im = innerTj.exec(inner)) !== null) {
-        textParts.push(decodePdfString(im[1]));
-      }
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    // Join text items; use a space between items and a newline between lines
+    const pageText = content.items
+      .map((item: any) => ("str" in item ? item.str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (pageText) {
+      pageTexts.push(pageText);
     }
   }
 
-  const text = textParts.join(" ").replace(/\s+/g, " ").trim();
-  return text || "[Could not extract text from this PDF. Try copying and pasting the text manually.]";
-}
-
-/**
- * Decodes common PDF string escape sequences.
- */
-function decodePdfString(s: string): string {
-  return s
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\'/g, "'")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/[^\x20-\x7E\n\r\t]/g, ""); // Strip non-printable chars
+  const text = pageTexts.join("\n\n");
+  return (
+    text ||
+    "[Could not extract text from this PDF. The file may be image-based or scanned. Try copying and pasting the text manually.]"
+  );
 }
 
 /**
@@ -82,5 +61,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
   if (name.endsWith(".docx") || name.endsWith(".doc")) {
     return extractTextFromDOCX(file);
   }
-  throw new Error("Unsupported file type. Please upload a PDF or Word document (.pdf, .doc, .docx).");
+  throw new Error(
+    "Unsupported file type. Please upload a PDF or Word document (.pdf, .doc, .docx)."
+  );
 }

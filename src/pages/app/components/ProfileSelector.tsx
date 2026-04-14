@@ -1,25 +1,33 @@
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@/components";
 import { useApp } from "@/contexts";
 import { getAllProfiles } from "@/lib";
+import { useWindowResize } from "@/hooks";
 import { InterviewProfile } from "@/types";
 import { CheckIcon, UserCircle2Icon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export const ProfileSelector = () => {
   const { activeProfileId, setActiveProfileId } = useApp();
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
   const [open, setOpen] = useState(false);
+  const { resizeWindow } = useWindowResize();
 
-  // Load profiles on first open (lazy)
+  // Load profiles eagerly on mount
+  useEffect(() => {
+    getAllProfiles()
+      .then(setProfiles)
+      .catch(() => setProfiles([]));
+  }, []);
+
   const handleOpen = async (val: boolean) => {
-    setOpen(val);
-    if (val && profiles.length === 0) {
-      try {
-        const data = await getAllProfiles();
-        setProfiles(data);
-      } catch {
-        setProfiles([]);
-      }
+    if (val) {
+      // Expand the overlay window BEFORE opening the popover so the content is visible
+      await resizeWindow(true);
+      setOpen(true);
+    } else {
+      setOpen(false);
+      // The MutationObserver in useWindowResize collapses the window automatically
+      // when [data-radix-popper-content-wrapper] is removed from the DOM.
     }
   };
 
@@ -40,8 +48,12 @@ export const ProfileSelector = () => {
       <PopoverTrigger asChild>
         <Button
           size="icon"
-          variant={activeProfileId ? "default" : "ghost"}
-          className="relative cursor-pointer shrink-0"
+          variant="default"
+          className={`relative cursor-pointer shrink-0 ${
+            activeProfileId
+              ? "bg-green-500 hover:bg-green-600 text-white border-0"
+              : ""
+          }`}
           title={
             activeProfile
               ? `Active Profile: ${activeProfile.name}. Click to change.`
@@ -51,11 +63,11 @@ export const ProfileSelector = () => {
           <UserCircle2Icon className="h-4 w-4" />
           {activeProfileId && (
             <span
-              className="absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full bg-green-500 cursor-pointer"
+              className="absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full bg-white cursor-pointer"
               onClick={handleClear}
               title="Clear active profile"
             >
-              <XIcon className="size-2 text-white" />
+              <XIcon className="size-2 text-green-600" />
             </span>
           )}
         </Button>

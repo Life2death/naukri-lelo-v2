@@ -8,11 +8,12 @@ import {
 } from "./components";
 import { useApp } from "@/hooks";
 import { useApp as useAppContext } from "@/contexts";
-import { LayoutDashboardIcon } from "lucide-react";
+import { LayoutDashboardIcon, PowerIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ErrorBoundary } from "react-error-boundary";
 import { ErrorLayout } from "@/layouts";
 import { getPlatform } from "@/lib";
+import { exit } from "@tauri-apps/plugin-process";
 
 const App = () => {
   const { isHidden, systemAudio } = useApp();
@@ -24,6 +25,14 @@ const App = () => {
       await invoke("open_dashboard");
     } catch (error) {
       console.error("Failed to open dashboard:", error);
+    }
+  };
+
+  const handleQuit = async () => {
+    try {
+      await exit(0);
+    } catch (error) {
+      console.error("Failed to quit app:", error);
     }
   };
 
@@ -75,11 +84,22 @@ const App = () => {
 
             <Button
               size={"icon"}
+              variant="default"
               className="cursor-pointer"
               title="Open Dashboard"
               onClick={openDashboard}
             >
               <LayoutDashboardIcon className="h-4 w-4" />
+            </Button>
+
+            <Button
+              size={"icon"}
+              variant="default"
+              className="cursor-pointer"
+              title="Quit Naukri Lelo"
+              onClick={handleQuit}
+            >
+              <PowerIcon className="h-4 w-4" />
             </Button>
           </div>
 
