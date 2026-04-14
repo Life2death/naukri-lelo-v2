@@ -5,12 +5,20 @@ import {
   updateProfile,
   deleteProfile,
 } from "@/lib";
-import { InterviewProfile } from "@/types";
+import { InterviewProfile, InterviewProfileDocument } from "@/types";
 
 function generateProfileId(): string {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 11);
   return `profile_${timestamp}_${random}`;
+}
+
+interface ProfileFields {
+  name: string;
+  resumeText: string;
+  resumeFileName: string;
+  goals: string;
+  documents: InterviewProfileDocument[];
 }
 
 export function useProfiles() {
@@ -35,13 +43,15 @@ export function useProfiles() {
   }, [loadProfiles]);
 
   const addProfile = useCallback(
-    async (fields: { name: string; resumeText: string; goals: string }) => {
+    async (fields: ProfileFields) => {
       const now = Date.now();
       const profile: InterviewProfile = {
         id: generateProfileId(),
         name: fields.name,
         resumeText: fields.resumeText,
+        resumeFileName: fields.resumeFileName,
         goals: fields.goals,
+        documents: fields.documents,
         createdAt: now,
         updatedAt: now,
       };
@@ -53,10 +63,7 @@ export function useProfiles() {
   );
 
   const editProfile = useCallback(
-    async (
-      id: string,
-      fields: { name: string; resumeText: string; goals: string }
-    ) => {
+    async (id: string, fields: ProfileFields) => {
       const existing = profiles.find((p) => p.id === id);
       if (!existing) throw new Error("Profile not found");
       const updated: InterviewProfile = {

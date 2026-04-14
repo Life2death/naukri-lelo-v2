@@ -24,5 +24,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("migrations/interview-profiles.sql"),
             kind: MigrationKind::Up,
         },
+        // Migration 4: Add resume_file_name and documents_json to interview_profiles
+        Migration {
+            version: 4,
+            description: "add_resume_file_and_documents_to_profiles",
+            sql: include_str!("migrations/interview-profiles-v2.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }

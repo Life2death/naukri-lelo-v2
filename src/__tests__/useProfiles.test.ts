@@ -28,7 +28,9 @@ const profileA: InterviewProfile = {
   id: "profile_1_aaa",
   name: "Senior React Engineer",
   resumeText: "5 years React",
+  resumeFileName: "resume.pdf",
   goals: "FAANG senior role",
+  documents: [],
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -37,9 +39,19 @@ const profileB: InterviewProfile = {
   id: "profile_2_bbb",
   name: "Backend Dev",
   resumeText: "Node.js expert",
+  resumeFileName: "",
   goals: "Backend role at startup",
+  documents: [{ name: "cert.pdf", text: "Certification text" }],
   createdAt: NOW,
   updatedAt: NOW,
+};
+
+const baseFields = {
+  name: "New Profile",
+  resumeText: "some resume",
+  resumeFileName: "cv.pdf",
+  goals: "some goal",
+  documents: [],
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -86,15 +98,9 @@ describe("useProfiles", () => {
     const { result } = renderHook(() => useProfiles());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    const fields = {
-      name: "New Profile",
-      resumeText: "some resume",
-      goals: "some goal",
-    };
-
     let returned: InterviewProfile | undefined;
     await act(async () => {
-      returned = await result.current.addProfile(fields);
+      returned = await result.current.addProfile(baseFields);
     });
 
     expect(mockCreateProfile).toHaveBeenCalledOnce();
@@ -115,16 +121,32 @@ describe("useProfiles", () => {
 
     let returned: InterviewProfile | undefined;
     await act(async () => {
-      returned = await result.current.addProfile({
-        name: "Test",
-        resumeText: "resume",
-        goals: "goal",
-      });
+      returned = await result.current.addProfile(baseFields);
     });
 
     expect(returned?.id).toMatch(/^profile_/);
     expect(typeof returned?.createdAt).toBe("number");
     expect(typeof returned?.updatedAt).toBe("number");
+    expect(returned?.resumeFileName).toBe("cv.pdf");
+    expect(Array.isArray(returned?.documents)).toBe(true);
+  });
+
+  it("stores documents correctly in added profile", async () => {
+    mockGetAllProfiles.mockResolvedValueOnce([]);
+    mockCreateProfile.mockImplementation((p: InterviewProfile) =>
+      Promise.resolve(p)
+    );
+
+    const { result } = renderHook(() => useProfiles());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const docs = [{ name: "cert.pdf", text: "Certification" }];
+    let returned: InterviewProfile | undefined;
+    await act(async () => {
+      returned = await result.current.addProfile({ ...baseFields, documents: docs });
+    });
+
+    expect(returned?.documents).toEqual(docs);
   });
 
   // ── editProfile ────────────────────────────────────────────────────────────
@@ -141,7 +163,9 @@ describe("useProfiles", () => {
       await result.current.editProfile(profileA.id, {
         name: "Updated Name",
         resumeText: profileA.resumeText,
+        resumeFileName: profileA.resumeFileName,
         goals: profileA.goals,
+        documents: profileA.documents,
       });
     });
 
@@ -160,7 +184,9 @@ describe("useProfiles", () => {
         await result.current.editProfile("nonexistent-id", {
           name: "X",
           resumeText: "",
+          resumeFileName: "",
           goals: "",
+          documents: [],
         });
       })
     ).rejects.toThrow("Profile not found");
@@ -180,7 +206,9 @@ describe("useProfiles", () => {
       updated = await result.current.editProfile(profileA.id, {
         name: profileA.name,
         resumeText: profileA.resumeText,
+        resumeFileName: profileA.resumeFileName,
         goals: profileA.goals,
+        documents: profileA.documents,
       });
     });
 

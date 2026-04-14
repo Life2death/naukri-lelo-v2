@@ -27,7 +27,13 @@ import { useNavigate } from "react-router-dom";
 import moment from "moment";
 import { ProfileFormData, ProfileFormDialog } from "./ProfileFormDialog";
 
-const EMPTY_FORM: ProfileFormData = { name: "", resumeText: "", goals: "" };
+const EMPTY_FORM: ProfileFormData = {
+  name: "",
+  resumeText: "",
+  resumeFileName: "",
+  goals: "",
+  documents: [],
+};
 
 const Profiles = () => {
   const { profiles, isLoading, addProfile, editProfile, removeProfile } =
@@ -53,7 +59,14 @@ const Profiles = () => {
   const handleEditClick = (id: string) => {
     const p = profiles.find((x) => x.id === id);
     if (!p) return;
-    setForm({ id: p.id, name: p.name, resumeText: p.resumeText, goals: p.goals });
+    setForm({
+      id: p.id,
+      name: p.name,
+      resumeText: p.resumeText,
+      resumeFileName: p.resumeFileName,
+      goals: p.goals,
+      documents: p.documents,
+    });
     setIsDialogOpen(true);
   };
 
@@ -64,13 +77,17 @@ const Profiles = () => {
         await editProfile(form.id, {
           name: form.name,
           resumeText: form.resumeText,
+          resumeFileName: form.resumeFileName,
           goals: form.goals,
+          documents: form.documents,
         });
       } else {
         await addProfile({
           name: form.name,
           resumeText: form.resumeText,
+          resumeFileName: form.resumeFileName,
           goals: form.goals,
+          documents: form.documents,
         });
       }
       setIsDialogOpen(false);
@@ -129,9 +146,18 @@ const Profiles = () => {
                     {profile.goals}
                   </CardDescription>
                 ) : null}
-                {profile.resumeText ? (
+                {profile.resumeFileName ? (
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    Resume: {profile.resumeFileName}
+                  </p>
+                ) : profile.resumeText ? (
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
                     Resume: {profile.resumeText.length.toLocaleString()} chars
+                  </p>
+                ) : null}
+                {profile.documents.length > 0 ? (
+                  <p className="text-[10px] text-muted-foreground/60">
+                    {profile.documents.length} custom doc{profile.documents.length !== 1 ? "s" : ""}
                   </p>
                 ) : null}
               </CardHeader>

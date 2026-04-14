@@ -29,7 +29,9 @@ const dbRow = {
   id: "profile_1_abc",
   name: "Senior React Engineer",
   resume_text: "5 years React experience",
+  resume_file_name: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
+  documents_json: '[{"name":"cover.pdf","text":"Cover letter text"}]',
   created_at: NOW,
   updated_at: NOW,
 };
@@ -38,7 +40,9 @@ const expectedProfile: InterviewProfile = {
   id: "profile_1_abc",
   name: "Senior React Engineer",
   resumeText: "5 years React experience",
+  resumeFileName: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
+  documents: [{ name: "cover.pdf", text: "Cover letter text" }],
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -67,12 +71,19 @@ describe("interview-profiles.action", () => {
     });
 
     it("maps multiple rows correctly", async () => {
-      const row2 = { ...dbRow, id: "profile_2_xyz", name: "Backend Dev" };
+      const row2 = { ...dbRow, id: "profile_2_xyz", name: "Backend Dev", documents_json: "[]" };
       mockSelect.mockResolvedValueOnce([dbRow, row2]);
       const result = await getAllProfiles();
       expect(result).toHaveLength(2);
       expect(result[0].id).toBe("profile_1_abc");
       expect(result[1].id).toBe("profile_2_xyz");
+    });
+
+    it("falls back to empty documents array on invalid documents_json", async () => {
+      const rowBad = { ...dbRow, documents_json: "not-valid-json" };
+      mockSelect.mockResolvedValueOnce([rowBad]);
+      const result = await getAllProfiles();
+      expect(result[0].documents).toEqual([]);
     });
   });
 
@@ -111,7 +122,9 @@ describe("interview-profiles.action", () => {
           expectedProfile.id,
           expectedProfile.name,
           expectedProfile.resumeText,
+          expectedProfile.resumeFileName,
           expectedProfile.goals,
+          JSON.stringify(expectedProfile.documents),
           expectedProfile.createdAt,
           expectedProfile.updatedAt,
         ]
@@ -136,7 +149,9 @@ describe("interview-profiles.action", () => {
         [
           updated.name,
           updated.resumeText,
+          updated.resumeFileName,
           updated.goals,
+          JSON.stringify(updated.documents),
           updated.updatedAt,
           updated.id,
         ]

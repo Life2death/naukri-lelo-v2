@@ -5,16 +5,25 @@ import {
   Markdown,
 } from "@/components";
 import { useApp } from "@/contexts";
-import { fetchAIResponse, getProfileById } from "@/lib";
+import {
+  fetchAIResponse,
+  getProfileById,
+  createConversation,
+  generateConversationId,
+  generateMessageId,
+} from "@/lib";
 import { PageLayout } from "@/layouts";
 import { InterviewProfile } from "@/types";
 import {
   ArrowLeftIcon,
+  BookmarkIcon,
+  CheckIcon,
+  ClipboardCopyIcon,
   Loader2,
+  MicIcon,
   SendIcon,
   SparklesIcon,
 } from "lucide-react";
-// ArrowLeftIcon is used in the not-found fallback
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -23,7 +32,7 @@ interface ChatMessage {
   content: string;
 }
 
-const SYSTEM_PROMPT = `You are an expert technical interviewer helping a candidate prepare for a job interview.
+const INTERVIEW_SYSTEM_PROMPT = `You are an expert technical interviewer helping a candidate prepare for a job interview.
 
 Your approach:
 1. When the user asks to start interview prep, generate 5-8 interview questions progressing from easy to difficult based on their resume and job description.
@@ -34,11 +43,19 @@ Your approach:
 
 Use markdown for clear formatting.`;
 
-function buildInitialUserMessage(profile: InterviewProfile): string {
-  const parts: string[] = [
-    "Please help me prepare for my interview.",
-    "",
-  ];
+const ANALYZE_RESUME_PROMPT = `You are an expert career advisor and resume consultant.
+
+Analyze the candidate's resume against the job description provided. Your analysis should:
+1. **Match Score** — How well does the resume align with the JD? (provide a rough %)
+2. **Strengths** — Key skills and experiences that match the role.
+3. **Gaps** — Important keywords, skills, or experiences missing from the resume.
+4. **Suggested Improvements** — Specific, actionable changes to better target this role (rewrite bullet points, add keywords, reorder sections, etc.).
+5. **Key Talking Points** — 3-5 points the candidate should emphasize in the interview.
+
+Be specific and constructive. Use markdown for clear formatting.`;
+
+function buildInterviewUserMessage(profile: InterviewProfile): string {
+  const parts: string[] = ["Please help me prepare for my interview.", ""];
   if (profile.goals.trim()) {
     parts.push("**Target Role / Job Description:**");
     parts.push(profile.goals.trim());
@@ -49,10 +66,77 @@ function buildInitialUserMessage(profile: InterviewProfile): string {
     parts.push(profile.resumeText.trim());
     parts.push("");
   }
+  if (profile.documents.length > 0) {
+    parts.push("**Additional Documents:**");
+    for (const doc of profile.documents) {
+      parts.push(`--- ${doc.name} ---`);
+      parts.push(doc.text.trim());
+      parts.push("");
+    }
+  }
   parts.push(
     "Please generate interview questions starting from easy to difficult, tailored to this role and my experience."
   );
   return parts.join("\n");
+}
+
+function buildAnalyzeUserMessage(profile: InterviewProfile): string {
+  const parts: string[] = [];
+  if (profile.goals.trim()) {
+    parts.push("**Job Description:**");
+    parts.push(profile.goals.trim());
+    parts.push("");
+  }
+  if (profile.resumeText.trim()) {
+    parts.push("**My Resume:**");
+    parts.push(profile.resumeText.trim());
+    parts.push("");
+  }
+  if (parts.length === 0) {
+    return "Please analyze my profile and suggest resume improvements.";
+  }
+  parts.push("Please analyze my resume against this job description and suggest specific improvements.");
+  return parts.join("\n");
+}
+
+function buildSystemPromptWithDocuments(
+  basePrompt: string,
+  profile: InterviewProfile
+): string {
+  if (profile.documents.length === 0) return basePrompt;
+  const docSection = profile.documents
+    .map((d) => `### ${d.name}\n${d.text.trim()}`)
+    .join("\n\n");
+  return `${basePrompt}\n\n---\n## Candidate's Reference Documents\nUse these documents as additional context when answering questions:\n\n${docSection}`;
+}
+
+function formatConversationAsText(
+  messages: ChatMessage[],
+  profileName: string
+): string {
+  const lines: string[] = [
+    `Interview Prep Session — ${profileName}`,
+    `Exported on ${new Date().toLocaleString()}`,
+    "=".repeat(60),
+    "",
+  ];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === "user") {
+      const label = i === 0 ? "You (Start Prep)" : "You";
+      lines.push(`[${label}]`);
+      lines.push(
+        i === 0 && msg.content.length > 200
+          ? "Help me prepare for this interview (with resume & JD)"
+          : msg.content
+      );
+    } else {
+      lines.push("[AI Interviewer]");
+      lines.push(msg.content);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
 }
 
 const PrepSession = () => {
@@ -67,6 +151,11 @@ const PrepSession = () => {
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [isCopied, setIsCopied] = useState(false);
+  const [isSavingChat, setIsSavingChat] = useState(false);
+  const [isSavedChat, setIsSavedChat] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -91,7 +180,10 @@ const PrepSession = () => {
     return allAiProviders?.find((p) => p?.id === selectedAIProvider.provider);
   };
 
-  const sendMessage = async (userText: string) => {
+  const sendMessage = async (
+    userText: string,
+    opts?: { systemPrompt?: string; isAnalyze?: boolean }
+  ) => {
     if (!userText.trim() || isGenerating) return;
 
     const provider = getProvider();
@@ -102,21 +194,24 @@ const PrepSession = () => {
       return;
     }
 
+    const systemPrompt = opts?.systemPrompt
+      ? buildSystemPromptWithDocuments(opts.systemPrompt, profile!)
+      : buildSystemPromptWithDocuments(INTERVIEW_SYSTEM_PROMPT, profile!);
+
     setError(null);
-    setIsGenerating(true);
+    if (opts?.isAnalyze) {
+      setIsAnalyzing(true);
+    } else {
+      setIsGenerating(true);
+    }
 
     const userMsg: ChatMessage = { role: "user", content: userText.trim() };
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
     setInput("");
 
-    // Prepare history for the API (all previous messages except the one we just added)
-    const history = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
-    // Add placeholder assistant message
     const assistantIdx = updatedMessages.length;
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
@@ -127,7 +222,7 @@ const PrepSession = () => {
       for await (const chunk of fetchAIResponse({
         provider,
         selectedProvider: selectedAIProvider,
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt,
         history,
         userMessage: userText.trim(),
         signal: abortRef.current.signal,
@@ -144,22 +239,30 @@ const PrepSession = () => {
       const msg =
         err instanceof Error ? err.message : "An unknown error occurred";
       setError(msg);
-      // Remove the empty assistant placeholder on error
       setMessages((prev) => prev.filter((_, i) => i !== assistantIdx));
     } finally {
       setIsGenerating(false);
+      setIsAnalyzing(false);
       abortRef.current = null;
     }
   };
 
   const handleStartPrep = () => {
     if (!profile) return;
-    sendMessage(buildInitialUserMessage(profile));
+    sendMessage(buildInterviewUserMessage(profile), {
+      systemPrompt: INTERVIEW_SYSTEM_PROMPT,
+    });
   };
 
-  const handleSend = () => {
-    sendMessage(input);
+  const handleAnalyzeResume = () => {
+    if (!profile) return;
+    sendMessage(buildAnalyzeUserMessage(profile), {
+      systemPrompt: ANALYZE_RESUME_PROMPT,
+      isAnalyze: true,
+    });
   };
+
+  const handleSend = () => sendMessage(input);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -171,7 +274,60 @@ const PrepSession = () => {
   const handleCancel = () => {
     abortRef.current?.abort();
     setIsGenerating(false);
+    setIsAnalyzing(false);
   };
+
+  const handleCopyConversation = async () => {
+    if (!profile || messages.length === 0) return;
+    try {
+      const text = formatConversationAsText(messages, profile.name);
+      await navigator.clipboard.writeText(text);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch {
+      setError("Failed to copy to clipboard.");
+    }
+  };
+
+  const handleSaveToChats = async () => {
+    if (!profile || messages.length === 0) return;
+    setIsSavingChat(true);
+    try {
+      const now = Date.now();
+      const convId = generateConversationId("chat");
+      const title = `Interview Prep — ${profile.name}`;
+      const chatMessages = messages
+        .filter((m) => m.content.trim())
+        .map((m, i) => ({
+          id: generateMessageId(m.role, now + i),
+          role: m.role as "user" | "assistant",
+          content:
+            m.role === "user" && i === 0 && m.content.length > 200
+              ? "Help me prepare for this interview (with resume & JD)"
+              : m.content,
+          timestamp: now + i,
+        }));
+
+      await createConversation({
+        id: convId,
+        title,
+        messages: chatMessages,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      setIsSavedChat(true);
+      setTimeout(() => setIsSavedChat(false), 2500);
+    } catch (err: any) {
+      setError("Failed to save conversation to chats.");
+    } finally {
+      setIsSavingChat(false);
+    }
+  };
+
+  const canAnalyze =
+    profile &&
+    (profile.resumeText.trim().length > 0 || profile.goals.trim().length > 0);
 
   if (profileLoading) {
     return (
@@ -223,11 +379,18 @@ const PrepSession = () => {
               {profile.goals}
             </p>
           )}
-          {profile.resumeText && (
-            <p className="text-[10px] text-muted-foreground/60">
-              Resume loaded ({profile.resumeText.length.toLocaleString()} chars)
-            </p>
-          )}
+          <div className="flex flex-wrap gap-2 mt-1">
+            {profile.resumeFileName && (
+              <p className="text-[10px] text-muted-foreground/60">
+                Resume: {profile.resumeFileName}
+              </p>
+            )}
+            {profile.documents.length > 0 && (
+              <p className="text-[10px] text-muted-foreground/60">
+                {profile.documents.length} custom doc{profile.documents.length !== 1 ? "s" : ""}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Error */}
@@ -246,27 +409,126 @@ const PrepSession = () => {
             <div className="space-y-1">
               <p className="text-sm font-medium">Ready to practice?</p>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Click the button below to generate personalized interview
-                questions based on your profile.
+                Start prep to generate personalized interview questions, or analyze your resume against the job description.
               </p>
             </div>
-            <Button onClick={handleStartPrep} disabled={isGenerating}>
-              {isGenerating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <SparklesIcon className="size-4" />
-                  Generate Interview Questions
-                </>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                onClick={handleStartPrep}
+                disabled={isGenerating || isAnalyzing}
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon className="size-4" />
+                    Start Prep
+                  </>
+                )}
+              </Button>
+              {canAnalyze && (
+                <Button
+                  variant="outline"
+                  onClick={handleAnalyzeResume}
+                  disabled={isGenerating || isAnalyzing}
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <MicIcon className="size-4" />
+                      Analyze Resume
+                    </>
+                  )}
+                </Button>
               )}
-            </Button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            <ScrollArea className="h-[calc(100vh-22rem)] rounded-lg border bg-muted/20">
+            {/* Conversation toolbar */}
+            <div className="flex items-center gap-2 justify-between">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleStartPrep}
+                  disabled={isGenerating || isAnalyzing}
+                  className="h-7 text-xs gap-1 px-2"
+                >
+                  <SparklesIcon className="size-3.5" />
+                  New Prep
+                </Button>
+                {canAnalyze && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAnalyzeResume}
+                    disabled={isGenerating || isAnalyzing}
+                    className="h-7 text-xs gap-1 px-2"
+                  >
+                    {isAnalyzing ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <MicIcon className="size-3.5" />
+                    )}
+                    Analyze Resume
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCopyConversation}
+                  disabled={messages.length === 0}
+                  className="h-7 text-xs gap-1 px-2"
+                  title="Copy conversation to clipboard"
+                >
+                  {isCopied ? (
+                    <>
+                      <CheckIcon className="size-3.5 text-green-500" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardCopyIcon className="size-3.5" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSaveToChats}
+                  disabled={messages.length === 0 || isSavingChat}
+                  className="h-7 text-xs gap-1 px-2"
+                  title="Save conversation to Chats"
+                >
+                  {isSavingChat ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : isSavedChat ? (
+                    <>
+                      <CheckIcon className="size-3.5 text-green-500" />
+                      Saved!
+                    </>
+                  ) : (
+                    <>
+                      <BookmarkIcon className="size-3.5" />
+                      Save to Chats
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <ScrollArea className="h-[calc(100vh-26rem)] rounded-lg border bg-muted/20">
               <div className="p-4 space-y-4">
                 {messages.map((msg, idx) => (
                   <div
@@ -314,10 +576,10 @@ const PrepSession = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isGenerating}
+                disabled={isGenerating || isAnalyzing}
                 className="flex-1"
               />
-              {isGenerating ? (
+              {isGenerating || isAnalyzing ? (
                 <Button variant="outline" onClick={handleCancel} size="icon">
                   <span className="size-3.5 rounded-sm bg-foreground/70" />
                 </Button>
@@ -343,7 +605,7 @@ const PrepSession = () => {
                 <button
                   key={suggestion}
                   onClick={() => sendMessage(suggestion)}
-                  disabled={isGenerating}
+                  disabled={isGenerating || isAnalyzing}
                   className="text-xs px-2.5 py-1 rounded-full border border-input hover:bg-accent transition-colors disabled:opacity-50"
                 >
                   {suggestion}
