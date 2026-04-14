@@ -4,6 +4,8 @@ import { InterviewProfile, InterviewProfileDocument } from "@/types";
 interface DbInterviewProfile {
   id: string;
   name: string;
+  first_name: string;
+  persona_text: string;
   resume_text: string;
   resume_file_name: string;
   goals: string;
@@ -23,6 +25,8 @@ function toProfile(row: DbInterviewProfile): InterviewProfile {
   return {
     id: row.id,
     name: row.name,
+    firstName: row.first_name || "",
+    persona: row.persona_text || "",
     resumeText: row.resume_text,
     resumeFileName: row.resume_file_name || "",
     goals: row.goals,
@@ -53,8 +57,21 @@ export async function createProfile(profile: InterviewProfile): Promise<Intervie
   const db = await getDatabase();
   const documentsJson = JSON.stringify(profile.documents || []);
   await db.execute(
-    "INSERT INTO interview_profiles (id, name, resume_text, resume_file_name, goals, documents_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    [profile.id, profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.createdAt, profile.updatedAt]
+    `INSERT INTO interview_profiles
+       (id, name, first_name, persona_text, resume_text, resume_file_name, goals, documents_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      profile.id,
+      profile.name,
+      profile.firstName || "",
+      profile.persona || "",
+      profile.resumeText,
+      profile.resumeFileName || "",
+      profile.goals,
+      documentsJson,
+      profile.createdAt,
+      profile.updatedAt,
+    ]
   );
   return profile;
 }
@@ -63,8 +80,21 @@ export async function updateProfile(profile: InterviewProfile): Promise<Intervie
   const db = await getDatabase();
   const documentsJson = JSON.stringify(profile.documents || []);
   await db.execute(
-    "UPDATE interview_profiles SET name = ?, resume_text = ?, resume_file_name = ?, goals = ?, documents_json = ?, updated_at = ? WHERE id = ?",
-    [profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.updatedAt, profile.id]
+    `UPDATE interview_profiles
+     SET name = ?, first_name = ?, persona_text = ?, resume_text = ?,
+         resume_file_name = ?, goals = ?, documents_json = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      profile.name,
+      profile.firstName || "",
+      profile.persona || "",
+      profile.resumeText,
+      profile.resumeFileName || "",
+      profile.goals,
+      documentsJson,
+      profile.updatedAt,
+      profile.id,
+    ]
   );
   return profile;
 }

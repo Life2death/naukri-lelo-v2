@@ -32,6 +32,8 @@ import { InterviewProfile } from "@/types";
 
 const EMPTY_FORM: ProfileFormData = {
   name: "",
+  firstName: "",
+  persona: "",
   resumeText: "",
   resumeFileName: "",
   goals: "",
@@ -65,6 +67,8 @@ const Profiles = () => {
     setForm({
       id: p.id,
       name: p.name,
+      firstName: p.firstName || "",
+      persona: p.persona || "",
       resumeText: p.resumeText,
       resumeFileName: p.resumeFileName,
       goals: p.goals,
@@ -124,6 +128,8 @@ const Profiles = () => {
       if (form.id) {
         await editProfile(form.id, {
           name: form.name,
+          firstName: form.firstName,
+          persona: form.persona,
           resumeText: form.resumeText,
           resumeFileName: form.resumeFileName,
           goals: form.goals,
@@ -132,6 +138,8 @@ const Profiles = () => {
       } else {
         await addProfile({
           name: form.name,
+          firstName: form.firstName,
+          persona: form.persona,
           resumeText: form.resumeText,
           resumeFileName: form.resumeFileName,
           goals: form.goals,

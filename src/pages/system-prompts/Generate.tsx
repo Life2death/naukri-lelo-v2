@@ -3,27 +3,21 @@ import {
   PopoverContent,
   PopoverTrigger,
   Button,
-  GetLicense,
   Textarea,
 } from "@/components";
 import { SparklesIcon } from "lucide-react";
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "@/contexts";
+import { fetchAIResponse } from "@/lib";
 
 interface GenerateSystemPromptProps {
   onGenerate: (prompt: string, promptName: string) => void;
 }
 
-interface SystemPromptResponse {
-  prompt_name: string;
-  system_prompt: string;
-}
-
 export const GenerateSystemPrompt = ({
   onGenerate,
 }: GenerateSystemPromptProps) => {
-  const { hasActiveLicense } = useApp();
+  const { selectedAIProvider, allAiProviders } = useApp();
   const [userPrompt, setUserPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,22 +29,51 @@ export const GenerateSystemPrompt = ({
       return;
     }
 
+    const provider = allAiProviders.find((p) => p.id === selectedAIProvider.provider);
+    if (!provider) {
+      setError(
+        "No AI provider configured. Go to API Settings and add your API key first."
+      );
+      return;
+    }
+
     try {
       setIsGenerating(true);
       setError(null);
 
-      const response = await invoke<SystemPromptResponse>(
-        "create_system_prompt",
-        {
-          userPrompt: userPrompt.trim(),
-        }
-      );
+      // Ask the AI to write only the system prompt text
+      const instruction =
+        `Write a detailed, effective system prompt for an AI assistant based on this description:\n\n` +
+        `"${userPrompt.trim()}"\n\n` +
+        `Output ONLY the system prompt text — no headings, no explanation, no commentary. ` +
+        `The prompt should be clear, specific, and ready to use as-is.`;
 
-      if (response.system_prompt && response.prompt_name) {
-        onGenerate(response.system_prompt, response.prompt_name);
-        setIsOpen(false);
-        setUserPrompt("");
+      let generatedPrompt = "";
+      for await (const chunk of fetchAIResponse({
+        provider,
+        selectedProvider: selectedAIProvider,
+        systemPrompt: undefined,
+        history: [],
+        userMessage: instruction,
+        imagesBase64: [],
+      })) {
+        generatedPrompt += chunk;
       }
+
+      const finalPrompt = generatedPrompt.trim();
+      if (!finalPrompt) {
+        setError("AI returned an empty response. Try again.");
+        return;
+      }
+
+      // Derive a short name from the user's description (first 50 chars, sentence-cased)
+      const rawName = userPrompt.trim().substring(0, 50);
+      const promptName =
+        rawName.charAt(0).toUpperCase() + rawName.slice(1) + (rawName.length < userPrompt.trim().length ? "..." : "");
+
+      onGenerate(finalPrompt, promptName);
+      setIsOpen(false);
+      setUserPrompt("");
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to generate prompt";
@@ -82,8 +105,8 @@ export const GenerateSystemPrompt = ({
           <div>
             <p className="text-sm font-medium mb-1">Generate a system prompt</p>
             <p className="text-xs text-muted-foreground">
-              Describe the AI behavior you want, and we'll generate a prompt for
-              you.
+              Describe the AI behaviour you want and we'll generate a system
+              prompt using your configured AI provider.
             </p>
           </div>
 
@@ -100,37 +123,23 @@ export const GenerateSystemPrompt = ({
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 
-          {hasActiveLicense ? (
-            <Button
-              className="w-full"
-              onClick={handleGenerate}
-              disabled={!userPrompt.trim() || isGenerating}
-            >
-              {isGenerating ? (
-                <>
-                  <SparklesIcon className="h-4 w-4 animate-pulse" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <SparklesIcon className="h-4 w-4" />
-                  Generate
-                </>
-              )}
-            </Button>
-          ) : (
-            <div className="w-full flex flex-col gap-3">
-              <p className="text-sm font-medium text-muted-foreground">
-                You need an active license to use this feature. Click the button
-                below to get a license.
-              </p>
-              <GetLicense
-                buttonText="Get License"
-                buttonClassName="w-full"
-                setState={setIsOpen}
-              />
-            </div>
-          )}
+          <Button
+            className="w-full"
+            onClick={handleGenerate}
+            disabled={!userPrompt.trim() || isGenerating}
+          >
+            {isGenerating ? (
+              <>
+                <SparklesIcon className="h-4 w-4 animate-pulse" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <SparklesIcon className="h-4 w-4" />
+                Generate
+              </>
+            )}
+          </Button>
         </div>
       </PopoverContent>
     </Popover>

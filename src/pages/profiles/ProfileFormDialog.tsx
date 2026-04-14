@@ -9,14 +9,24 @@ import {
   Input,
   Textarea,
 } from "@/components";
-import { extractTextFromFile } from "@/lib";
+import { useApp } from "@/contexts";
+import { extractTextFromFile, fetchAIResponse } from "@/lib";
 import { InterviewProfileDocument } from "@/types";
-import { Loader2, PaperclipIcon, Trash2, UploadIcon, XIcon } from "lucide-react";
+import {
+  Loader2,
+  PaperclipIcon,
+  SparklesIcon,
+  Trash2,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
 import { useRef, useState } from "react";
 
 export interface ProfileFormData {
   id?: string;
   name: string;
+  firstName: string;
+  persona: string;
   resumeText: string;
   resumeFileName: string;
   goals: string;
@@ -42,6 +52,7 @@ export const ProfileFormDialog = ({
   isEditing = false,
   isSaving = false,
 }: ProfileFormDialogProps) => {
+  const { selectedAIProvider, allAiProviders } = useApp();
   const isValid = form.name.trim().length > 0;
 
   const resumeInputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +61,8 @@ export const ProfileFormDialog = ({
   const [isExtractingResume, setIsExtractingResume] = useState(false);
   const [isExtractingDoc, setIsExtractingDoc] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
+  const [personaError, setPersonaError] = useState<string | null>(null);
 
   const handleResumeFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -63,7 +76,6 @@ export const ProfileFormDialog = ({
       setExtractError(err?.message ?? "Failed to read file");
     } finally {
       setIsExtractingResume(false);
-      // Reset so same file can be re-selected
       if (resumeInputRef.current) resumeInputRef.current.value = "";
     }
   };
@@ -80,7 +92,6 @@ export const ProfileFormDialog = ({
     try {
       const newDocs: InterviewProfileDocument[] = [];
       for (const file of files) {
-        // Skip duplicates by name
         if (form.documents.some((d) => d.name === file.name)) continue;
         const text = await extractTextFromFile(file);
         newDocs.push({ name: file.name, text });
@@ -100,6 +111,67 @@ export const ProfileFormDialog = ({
     setForm((f) => ({ ...f, documents: f.documents.filter((d) => d.name !== name) }));
   };
 
+  /** Generates an interview persona using the user's configured AI provider */
+  const handleGeneratePersona = async () => {
+    const firstName = form.firstName.trim() || form.name.trim().split(" ")[0];
+    if (!firstName) {
+      setPersonaError("Enter a first name or profile name first.");
+      return;
+    }
+    if (!form.resumeText.trim()) {
+      setPersonaError("Upload a resume first so the AI can personalise the persona.");
+      return;
+    }
+
+    const provider = allAiProviders.find((p) => p.id === selectedAIProvider.provider);
+    if (!provider) {
+      setPersonaError(
+        "No AI provider configured. Go to API Settings and add your API key first."
+      );
+      return;
+    }
+
+    setIsGeneratingPersona(true);
+    setPersonaError(null);
+    // Clear current persona so the user sees streaming
+    setForm((f) => ({ ...f, persona: "" }));
+
+    const userMessage =
+      `Based on the resume below, write a concise first-person interview introduction (150–250 words) for ${firstName}.\n\n` +
+      `Requirements:\n` +
+      `- Start with "I am ${firstName}..."\n` +
+      `- Written entirely in first person as ${firstName}\n` +
+      `- Highlight the 2-3 most impressive skills, experiences, and achievements\n` +
+      `- Sound natural and conversational, as if speaking in a real interview\n` +
+      `- End with a sentence about what kind of role or opportunity they're looking for\n` +
+      (form.goals.trim() ? `\nTarget Role:\n${form.goals.trim().substring(0, 500)}\n` : "") +
+      `\nResume:\n${form.resumeText.trim().substring(0, 8000)}\n\n` +
+      `Write only the persona text. No headings, no commentary.`;
+
+    try {
+      let generated = "";
+      for await (const chunk of fetchAIResponse({
+        provider,
+        selectedProvider: selectedAIProvider,
+        systemPrompt: undefined,
+        history: [],
+        userMessage,
+        imagesBase64: [],
+      })) {
+        generated += chunk;
+        setForm((f) => ({ ...f, persona: generated }));
+      }
+    } catch (err: any) {
+      setPersonaError(err?.message ?? "Failed to generate persona. Try again.");
+    } finally {
+      setIsGeneratingPersona(false);
+    }
+  };
+
+  // Can we show the Generate Persona button?
+  const canGeneratePersona =
+    (form.firstName.trim() || form.name.trim()) && form.resumeText.trim();
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[640px] max-h-[90vh] flex flex-col p-0">
@@ -109,8 +181,8 @@ export const ProfileFormDialog = ({
           </DialogTitle>
           <DialogDescription>
             {isEditing
-              ? "Update your profile details."
-              : "Add your resume and goals to generate tailored interview questions."}
+              ? "Update your profile details and persona."
+              : "Add your name, resume and goals to create a personalised interview persona."}
           </DialogDescription>
         </DialogHeader>
 
@@ -127,12 +199,29 @@ export const ProfileFormDialog = ({
             />
           </div>
 
+          {/* First Name */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Your First Name{" "}
+              <span className="text-muted-foreground font-normal text-xs">
+                (used in the interview persona)
+              </span>
+            </label>
+            <Input
+              placeholder="e.g., Vikram"
+              value={form.firstName}
+              onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))}
+              disabled={isSaving}
+              className="h-11"
+            />
+          </div>
+
           {/* Goals / Job Description */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Goals / Job Description</label>
             <Textarea
-              placeholder="Paste the job description, or describe the role you're targeting and what you want to achieve in this interview prep session..."
-              className="min-h-[120px] resize-none"
+              placeholder="Paste the job description, or describe the role you're targeting..."
+              className="min-h-[100px] resize-none"
               value={form.goals}
               onChange={(e) => setForm((f) => ({ ...f, goals: e.target.value }))}
               disabled={isSaving}
@@ -144,7 +233,7 @@ export const ProfileFormDialog = ({
             <label className="text-sm font-medium">
               Resume{" "}
               <span className="text-muted-foreground font-normal text-xs">
-                (optional — PDF or Word)
+                (PDF or Word)
               </span>
             </label>
 
@@ -196,12 +285,68 @@ export const ProfileFormDialog = ({
             />
           </div>
 
+          {/* Generate Persona Section */}
+          <div className="space-y-2 rounded-lg border border-dashed border-primary/30 bg-primary/3 p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Interview Persona</p>
+                <p className="text-xs text-muted-foreground">
+                  AI generates a first-person introduction used as your identity during interviews.
+                  {!canGeneratePersona && " Upload a resume to enable."}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!canGeneratePersona || isGeneratingPersona || isSaving}
+                onClick={handleGeneratePersona}
+                className="shrink-0 gap-1.5"
+                title="Generate persona from resume using AI"
+              >
+                {isGeneratingPersona ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon className="size-3.5" />
+                    {form.persona ? "Regenerate" : "Generate Persona"}
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {personaError && (
+              <p className="text-xs text-destructive">{personaError}</p>
+            )}
+
+            <Textarea
+              placeholder={
+                canGeneratePersona
+                  ? 'Click "Generate Persona" to create your interview introduction, or write it manually...'
+                  : "Upload your resume first, then generate or write your persona here..."
+              }
+              className="min-h-[120px] resize-none text-xs"
+              value={form.persona}
+              onChange={(e) => setForm((f) => ({ ...f, persona: e.target.value }))}
+              disabled={isSaving || isGeneratingPersona}
+            />
+
+            {form.persona && (
+              <p className="text-[10px] text-muted-foreground/60">
+                You can edit this text directly. It will be used as your identity in AI-assisted interview sessions.
+              </p>
+            )}
+          </div>
+
           {/* Custom Documents */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium">
               Custom Documents{" "}
               <span className="text-muted-foreground font-normal text-xs">
-                (optional — used as AI memory during prep)
+                (Q&amp;A prep, certifications — used as AI memory)
               </span>
             </label>
 
@@ -261,10 +406,6 @@ export const ProfileFormDialog = ({
             {extractError && (
               <p className="text-xs text-destructive">{extractError}</p>
             )}
-
-            <p className="text-xs text-muted-foreground/70">
-              Upload certifications, cover letters, or any document you want the AI to reference when answering questions.
-            </p>
           </div>
         </div>
 

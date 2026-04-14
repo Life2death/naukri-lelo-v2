@@ -39,7 +39,7 @@ const dbRow = {
 const expectedProfile: InterviewProfile = {
   id: "profile_1_abc",
   name: "Senior React Engineer",
-  resumeText: "5 years React experience",
+  firstName: "", persona: "", resumeText: "5 years React experience",
   resumeFileName: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
   documents: [{ name: "cover.pdf", text: "Cover letter text" }],

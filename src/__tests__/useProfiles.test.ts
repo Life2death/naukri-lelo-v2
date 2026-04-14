@@ -27,7 +27,7 @@ const NOW = 1_700_000_000_000;
 const profileA: InterviewProfile = {
   id: "profile_1_aaa",
   name: "Senior React Engineer",
-  resumeText: "5 years React",
+  firstName: "", persona: "", resumeText: "5 years React",
   resumeFileName: "resume.pdf",
   goals: "FAANG senior role",
   documents: [],
@@ -38,7 +38,7 @@ const profileA: InterviewProfile = {
 const profileB: InterviewProfile = {
   id: "profile_2_bbb",
   name: "Backend Dev",
-  resumeText: "Node.js expert",
+  firstName: "", persona: "", resumeText: "Node.js expert",
   resumeFileName: "",
   goals: "Backend role at startup",
   documents: [{ name: "cert.pdf", text: "Certification text" }],
@@ -48,7 +48,7 @@ const profileB: InterviewProfile = {
 
 const baseFields = {
   name: "New Profile",
-  resumeText: "some resume",
+  firstName: "", persona: "", resumeText: "some resume",
   resumeFileName: "cv.pdf",
   goals: "some goal",
   documents: [],
@@ -162,7 +162,7 @@ describe("useProfiles", () => {
     await act(async () => {
       await result.current.editProfile(profileA.id, {
         name: "Updated Name",
-        resumeText: profileA.resumeText,
+        firstName: "", persona: "", resumeText: profileA.resumeText,
         resumeFileName: profileA.resumeFileName,
         goals: profileA.goals,
         documents: profileA.documents,
@@ -183,7 +183,7 @@ describe("useProfiles", () => {
       act(async () => {
         await result.current.editProfile("nonexistent-id", {
           name: "X",
-          resumeText: "",
+          firstName: "", persona: "", resumeText: "",
           resumeFileName: "",
           goals: "",
           documents: [],
@@ -205,7 +205,7 @@ describe("useProfiles", () => {
     await act(async () => {
       updated = await result.current.editProfile(profileA.id, {
         name: profileA.name,
-        resumeText: profileA.resumeText,
+        firstName: "", persona: "", resumeText: profileA.resumeText,
         resumeFileName: profileA.resumeFileName,
         goals: profileA.goals,
         documents: profileA.documents,

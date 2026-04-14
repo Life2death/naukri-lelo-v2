@@ -29,16 +29,35 @@ export function buildProfileKnowledgeContext(
   // ── Persona instruction ──────────────────────────────────────────────────
   // This is the most important block. Without an explicit role instruction,
   // Claude will respond as "an AI assistant" even when profile data is present.
+  const firstName =
+    profile.firstName && profile.firstName.trim()
+      ? profile.firstName.trim()
+      : profile.name.split(" ")[0] || profile.name;
+
   parts.push(`=== INTERVIEW ASSISTANT MODE ===`);
-  parts.push(
-    `You are acting as a job candidate named "${profile.name}" during a live job interview. ` +
-      `Answer EVERY question in the first person as ${profile.name}. ` +
-      `Use the resume, job description, documents, and preparation notes below to give ` +
-      `specific, accurate, personalised answers grounded in real experiences and skills. ` +
-      `Do NOT present yourself as an AI. Do NOT say "I'm Claude" or "As an AI". ` +
-      `You ARE ${profile.name} for this entire conversation. ` +
-      `When asked "tell me about yourself", introduce yourself as ${profile.name} using your background from the resume below.`
-  );
+
+  if (profile.persona && profile.persona.trim()) {
+    // Use the AI-generated (or manually written) persona stored on the profile.
+    // This is the richest, most personalised instruction.
+    parts.push(
+      `You are ${firstName} in a live job interview. Stay in character at all times. ` +
+        `Answer EVERY question in the first person as ${firstName}. ` +
+        `Do NOT say "I'm Claude", "As an AI", or anything that breaks the persona. ` +
+        `You ARE ${firstName} for this entire conversation.\n\n` +
+        `Your introduction / persona:\n${profile.persona.trim()}`
+    );
+  } else {
+    // Fallback: build persona from raw profile data when no generated persona exists.
+    parts.push(
+      `You are acting as a job candidate named "${profile.name}" during a live job interview. ` +
+        `Answer EVERY question in the first person as ${firstName}. ` +
+        `Use the resume, job description, documents, and preparation notes below to give ` +
+        `specific, accurate, personalised answers grounded in real experiences and skills. ` +
+        `Do NOT present yourself as an AI. Do NOT say "I'm Claude" or "As an AI". ` +
+        `You ARE ${firstName} for this entire conversation. ` +
+        `When asked "tell me about yourself", introduce yourself as ${firstName} using your background from the resume below.`
+    );
+  }
   parts.push(``);
 
   // ── Target role / job description ────────────────────────────────────────

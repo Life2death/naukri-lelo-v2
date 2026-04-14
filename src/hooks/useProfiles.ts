@@ -15,6 +15,8 @@ function generateProfileId(): string {
 
 interface ProfileFields {
   name: string;
+  firstName: string;
+  persona: string;
   resumeText: string;
   resumeFileName: string;
   goals: string;
@@ -48,6 +50,8 @@ export function useProfiles() {
       const profile: InterviewProfile = {
         id: generateProfileId(),
         name: fields.name,
+        firstName: fields.firstName || fields.name.split(" ")[0] || fields.name,
+        persona: fields.persona || "",
         resumeText: fields.resumeText,
         resumeFileName: fields.resumeFileName,
         goals: fields.goals,
@@ -69,6 +73,7 @@ export function useProfiles() {
       const updated: InterviewProfile = {
         ...existing,
         ...fields,
+        firstName: fields.firstName || fields.name.split(" ")[0] || fields.name,
         updatedAt: Date.now(),
       };
       await updateProfile(updated);
