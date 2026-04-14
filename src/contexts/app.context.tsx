@@ -144,6 +144,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     safeLocalStorage.setItem(STORAGE_KEYS.SUPPORTS_IMAGES, String(value));
   };
 
+  // Active Interview Profile
+  const [activeProfileId, setActiveProfileIdState] = useState<string | null>(
+    safeLocalStorage.getItem(STORAGE_KEYS.ACTIVE_PROFILE_ID) || null
+  );
+
+  const setActiveProfileId = (id: string | null) => {
+    setActiveProfileIdState(id);
+    if (id) {
+      safeLocalStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE_ID, id);
+    } else {
+      safeLocalStorage.removeItem(STORAGE_KEYS.ACTIVE_PROFILE_ID);
+    }
+  };
+
   // Naukri Lelo API State
   const [naukriLeloApiEnabled, setNaukriLeloApiEnabledState] = useState<boolean>(
     safeLocalStorage.getItem(STORAGE_KEYS.NAUKRI_LELO_API_ENABLED) === "true"
@@ -449,6 +463,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         setSupportsImagesState(e.newValue === "true");
       }
 
+      if (e.key === STORAGE_KEYS.ACTIVE_PROFILE_ID) {
+        setActiveProfileIdState(e.newValue || null);
+      }
+
       if (
         e.key === STORAGE_KEYS.CUSTOM_AI_PROVIDERS ||
         e.key === STORAGE_KEYS.SELECTED_AI_PROVIDER ||
@@ -697,6 +715,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setCursorType,
     supportsImages,
     setSupportsImages,
+    activeProfileId,
+    setActiveProfileId,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

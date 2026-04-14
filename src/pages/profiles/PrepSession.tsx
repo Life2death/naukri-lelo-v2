@@ -5,12 +5,14 @@ import {
   Markdown,
 } from "@/components";
 import { useApp } from "@/contexts";
+import { useExpandedLayout } from "@/contexts";
 import {
   fetchAIResponse,
   getProfileById,
   createConversation,
   generateConversationId,
   generateMessageId,
+  addProfileRefConvId,
 } from "@/lib";
 import { PageLayout } from "@/layouts";
 import { InterviewProfile } from "@/types";
@@ -19,8 +21,11 @@ import {
   BookmarkIcon,
   CheckIcon,
   ClipboardCopyIcon,
+  DownloadIcon,
   Loader2,
+  MaximizeIcon,
   MicIcon,
+  MinimizeIcon,
   SendIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -143,6 +148,7 @@ const PrepSession = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { selectedAIProvider, allAiProviders } = useApp();
+  const { isExpanded, setIsExpanded } = useExpandedLayout();
 
   const [profile, setProfile] = useState<InterviewProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -159,6 +165,13 @@ const PrepSession = () => {
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Collapse expanded mode when leaving the page
+  useEffect(() => {
+    return () => {
+      setIsExpanded(false);
+    };
+  }, [setIsExpanded]);
 
   // Load profile
   useEffect(() => {
@@ -289,7 +302,19 @@ const PrepSession = () => {
     }
   };
 
-  const handleSaveToChats = async () => {
+  const handleDownloadConversation = () => {
+    if (!profile || messages.length === 0) return;
+    const text = formatConversationAsText(messages, profile.name);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${profile.name.replace(/\s+/g, "-")}-prep-session-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSaveToChats = async (asReference = false) => {
     if (!profile || messages.length === 0) return;
     setIsSavingChat(true);
     try {
@@ -316,9 +341,14 @@ const PrepSession = () => {
         updatedAt: now,
       });
 
+      // Link to profile as a reference conversation
+      if (asReference && id) {
+        addProfileRefConvId(id, convId);
+      }
+
       setIsSavedChat(true);
       setTimeout(() => setIsSavedChat(false), 2500);
-    } catch (err: any) {
+    } catch {
       setError("Failed to save conversation to chats.");
     } finally {
       setIsSavingChat(false);
@@ -328,6 +358,10 @@ const PrepSession = () => {
   const canAnalyze =
     profile &&
     (profile.resumeText.trim().length > 0 || profile.goals.trim().length > 0);
+
+  const scrollAreaHeight = isExpanded
+    ? "h-[calc(100vh-14rem)]"
+    : "h-[calc(100vh-26rem)]";
 
   if (profileLoading) {
     return (
@@ -368,30 +402,32 @@ const PrepSession = () => {
     <PageLayout
       title={`Interview Prep — ${profile.name}`}
       description="AI-powered mock interview session"
-      allowBackButton
+      allowBackButton={!isExpanded}
     >
       <div className="flex flex-col gap-4">
         {/* Profile summary banner */}
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1">
-          <p className="text-xs font-semibold text-primary">{profile.name}</p>
-          {profile.goals && (
-            <p className="text-xs text-muted-foreground line-clamp-2">
-              {profile.goals}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2 mt-1">
-            {profile.resumeFileName && (
-              <p className="text-[10px] text-muted-foreground/60">
-                Resume: {profile.resumeFileName}
+        {!isExpanded && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1">
+            <p className="text-xs font-semibold text-primary">{profile.name}</p>
+            {profile.goals && (
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {profile.goals}
               </p>
             )}
-            {profile.documents.length > 0 && (
-              <p className="text-[10px] text-muted-foreground/60">
-                {profile.documents.length} custom doc{profile.documents.length !== 1 ? "s" : ""}
-              </p>
-            )}
+            <div className="flex flex-wrap gap-2 mt-1">
+              {profile.resumeFileName && (
+                <p className="text-[10px] text-muted-foreground/60">
+                  Resume: {profile.resumeFileName}
+                </p>
+              )}
+              {profile.documents.length > 0 && (
+                <p className="text-[10px] text-muted-foreground/60">
+                  {profile.documents.length} custom doc{profile.documents.length !== 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -453,7 +489,7 @@ const PrepSession = () => {
         ) : (
           <div className="flex flex-col gap-4">
             {/* Conversation toolbar */}
-            <div className="flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2 justify-between flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   variant="outline"
@@ -482,7 +518,30 @@ const PrepSession = () => {
                   </Button>
                 )}
               </div>
-              <div className="flex items-center gap-1.5">
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Expand / Minimize */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="h-7 text-xs gap-1 px-2"
+                  title={isExpanded ? "Minimize" : "Expand to full screen"}
+                >
+                  {isExpanded ? (
+                    <>
+                      <MinimizeIcon className="size-3.5" />
+                      Minimize
+                    </>
+                  ) : (
+                    <>
+                      <MaximizeIcon className="size-3.5" />
+                      Expand
+                    </>
+                  )}
+                </Button>
+
+                {/* Copy */}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -503,13 +562,28 @@ const PrepSession = () => {
                     </>
                   )}
                 </Button>
+
+                {/* Download .txt */}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleSaveToChats}
+                  onClick={handleDownloadConversation}
+                  disabled={messages.length === 0}
+                  className="h-7 text-xs gap-1 px-2"
+                  title="Download conversation as .txt file"
+                >
+                  <DownloadIcon className="size-3.5" />
+                  Download
+                </Button>
+
+                {/* Save to Chats */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleSaveToChats(false)}
                   disabled={messages.length === 0 || isSavingChat}
                   className="h-7 text-xs gap-1 px-2"
-                  title="Save conversation to Chats"
+                  title="Save to Chats"
                 >
                   {isSavingChat ? (
                     <Loader2 className="size-3.5 animate-spin" />
@@ -525,10 +599,30 @@ const PrepSession = () => {
                     </>
                   )}
                 </Button>
+
+                {/* Save as Reference (links to profile knowledge hub) */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleSaveToChats(true)}
+                  disabled={messages.length === 0 || isSavingChat}
+                  className="h-7 text-xs gap-1 px-2 text-primary hover:text-primary"
+                  title="Save as Reference — this conversation will be added to the profile knowledge hub and used as context when you select this profile on the overlay"
+                >
+                  <SparklesIcon className="size-3.5" />
+                  Save as Reference
+                </Button>
               </div>
             </div>
 
-            <ScrollArea className="h-[calc(100vh-26rem)] rounded-lg border bg-muted/20">
+            {/* Reference save tip */}
+            <div className="rounded-lg border border-primary/10 bg-primary/5 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                <span className="font-semibold text-primary">Tip:</span> If this session went well, click <strong>Save as Reference</strong> — it will be added to your profile knowledge hub and the AI will reference it when you select this profile on the overlay during an interview.
+              </p>
+            </div>
+
+            <ScrollArea className={`${scrollAreaHeight} rounded-lg border bg-muted/20`}>
               <div className="p-4 space-y-4">
                 {messages.map((msg, idx) => (
                   <div
@@ -549,7 +643,6 @@ const PrepSession = () => {
                     >
                       {msg.role === "user" ? (
                         <p className="whitespace-pre-wrap break-words">
-                          {/* Show short summary for the initial long message */}
                           {idx === 0 && msg.content.length > 200
                             ? "Help me prepare for this interview (with resume & JD)"
                             : msg.content}

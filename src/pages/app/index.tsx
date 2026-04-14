@@ -4,6 +4,7 @@ import {
   Completion,
   AudioVisualizer,
   StatusIndicator,
+  ProfileSelector,
 } from "./components";
 import { useApp } from "@/hooks";
 import { useApp as useAppContext } from "@/contexts";
@@ -68,6 +69,10 @@ const App = () => {
             }`}
           >
             <Completion isHidden={isHidden} />
+
+            {/* Profile selector — injects profile knowledge hub into AI answers */}
+            <ProfileSelector />
+
             <Button
               size={"icon"}
               className="cursor-pointer"

@@ -59,4 +59,6 @@ export type IContextType = {
   supportsImages: boolean;
   setSupportsImages: (value: boolean) => void;
   setSelectedModel?: (model: any) => void;
+  activeProfileId: string | null;
+  setActiveProfileId: (id: string | null) => void;
 };

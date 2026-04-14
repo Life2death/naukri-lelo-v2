@@ -13,6 +13,7 @@ import {
 } from "@/components";
 import { useProfiles } from "@/hooks";
 import {
+  DownloadIcon,
   MoreHorizontal,
   Pencil,
   PlayCircle,
@@ -26,6 +27,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import moment from "moment";
 import { ProfileFormData, ProfileFormDialog } from "./ProfileFormDialog";
+import { getConversationById, getProfileRefConvIds } from "@/lib";
+import { InterviewProfile } from "@/types";
 
 const EMPTY_FORM: ProfileFormData = {
   name: "",
@@ -68,6 +71,51 @@ const Profiles = () => {
       documents: p.documents,
     });
     setIsDialogOpen(true);
+  };
+
+  const handleExportProfile = async (profile: InterviewProfile) => {
+    try {
+      // Load all linked reference conversations
+      const refIds = getProfileRefConvIds(profile.id);
+      const conversations = [];
+      for (const convId of refIds) {
+        try {
+          const conv = await getConversationById(convId);
+          if (conv) conversations.push(conv);
+        } catch {
+          // skip missing conversations
+        }
+      }
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        version: "0.1.12",
+        profile: {
+          id: profile.id,
+          name: profile.name,
+          goals: profile.goals,
+          resumeFileName: profile.resumeFileName,
+          resumeText: profile.resumeText,
+          documents: profile.documents,
+          createdAt: profile.createdAt,
+          updatedAt: profile.updatedAt,
+        },
+        referenceConversations: conversations,
+        importNote:
+          "To import this profile on another machine, go to Interview Profiles and use the Import Profile option (coming soon). For now, you can manually recreate the profile and paste your resume text.",
+      };
+
+      const json = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${profile.name.replace(/\s+/g, "-")}-profile-export.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export profile:", err);
+    }
   };
 
   const handleSave = async () => {
@@ -183,10 +231,14 @@ const Profiles = () => {
                         <MoreHorizontal className="size-4 text-muted-foreground" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-36">
+                    <DropdownMenuContent align="end" className="w-40">
                       <DropdownMenuItem onClick={() => handleEditClick(profile.id)}>
                         <Pencil className="size-4 mr-2" />
                         Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleExportProfile(profile)}>
+                        <DownloadIcon className="size-4 mr-2" />
+                        Export Data
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"

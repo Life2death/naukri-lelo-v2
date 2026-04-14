@@ -13,7 +13,11 @@ import {
   generateMessageId,
   generateRequestId,
   getResponseSettings,
+  getProfileById,
+  buildProfileKnowledgeContext,
+  loadProfileRefConvTexts,
 } from "@/lib";
+import { InterviewProfile } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -58,8 +62,13 @@ export const useCompletion = () => {
     systemPrompt,
     screenshotConfiguration,
     setScreenshotConfiguration,
+    activeProfileId,
   } = useApp();
   const globalShortcuts = useGlobalShortcuts();
+
+  // Cache loaded profile and its ref-conv texts so we don't re-fetch every keystroke
+  const activeProfileRef = useRef<InterviewProfile | null>(null);
+  const profileContextRef = useRef<string>("");
 
   const [state, setState] = useState<CompletionState>({
     input: "",
@@ -84,9 +93,41 @@ export const useCompletion = () => {
 
   const { resizeWindow } = useWindowResize();
 
+  /** Builds the effective system prompt, prepending profile knowledge context when a profile is active */
+  const buildEffectiveSystemPrompt = useCallback((): string | undefined => {
+    const base = systemPrompt || undefined;
+    const profileCtx = profileContextRef.current;
+    if (!profileCtx) return base;
+    return base ? `${profileCtx}\n\n---\n\n${base}` : profileCtx;
+  }, [systemPrompt]);
+
   useEffect(() => {
     screenshotConfigRef.current = screenshotConfiguration;
   }, [screenshotConfiguration]);
+
+  // Reload the active profile and build its knowledge context whenever activeProfileId changes
+  useEffect(() => {
+    if (!activeProfileId) {
+      activeProfileRef.current = null;
+      profileContextRef.current = "";
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getProfileById(activeProfileId);
+        if (cancelled || !profile) return;
+        activeProfileRef.current = profile;
+        const refTexts = await loadProfileRefConvTexts(activeProfileId);
+        if (cancelled) return;
+        profileContextRef.current = buildProfileKnowledgeContext(profile, refTexts);
+      } catch {
+        activeProfileRef.current = null;
+        profileContextRef.current = "";
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProfileId]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -211,7 +252,7 @@ export const useCompletion = () => {
           for await (const chunk of fetchAIResponse({
             provider: provider,
             selectedProvider: selectedAIProvider,
-            systemPrompt: systemPrompt || undefined,
+            systemPrompt: buildEffectiveSystemPrompt(),
             history: messageHistory,
             userMessage: input,
             imagesBase64,
@@ -289,6 +330,7 @@ export const useCompletion = () => {
       allAiProviders,
       systemPrompt,
       state.conversationHistory,
+      buildEffectiveSystemPrompt,
     ]
   );
 
@@ -613,7 +655,7 @@ export const useCompletion = () => {
             for await (const chunk of fetchAIResponse({
               provider: provider,
               selectedProvider: selectedAIProvider,
-              systemPrompt: systemPrompt || undefined,
+              systemPrompt: buildEffectiveSystemPrompt(),
               history: messageHistory,
               userMessage: prompt,
               imagesBase64: [base64],
@@ -703,6 +745,7 @@ export const useCompletion = () => {
       systemPrompt,
       saveCurrentConversation,
       inputRef,
+      buildEffectiveSystemPrompt,
     ]
   );
 

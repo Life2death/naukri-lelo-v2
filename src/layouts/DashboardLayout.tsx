@@ -2,8 +2,11 @@ import { Sidebar } from "@/components";
 import { Outlet } from "react-router-dom";
 import { ErrorBoundary } from "react-error-boundary";
 import { ErrorLayout } from "./ErrorLayout";
+import { useExpandedLayout } from "@/contexts";
 
 export const DashboardLayout = () => {
+  const { isExpanded } = useExpandedLayout();
+
   return (
     <ErrorBoundary
       fallbackRender={() => {
@@ -21,10 +24,15 @@ export const DashboardLayout = () => {
           data-tauri-drag-region={true}
         />
 
-        {/* Sidebar */}
-        <Sidebar />
+        {/* Sidebar — hidden in expanded mode */}
+        {!isExpanded && <Sidebar />}
+
         {/* Main Content */}
-        <main className="flex flex-1 flex-col overflow-hidden px-8">
+        <main
+          className={`flex flex-1 flex-col overflow-hidden ${
+            isExpanded ? "px-4" : "px-8"
+          }`}
+        >
           <Outlet />
         </main>
       </div>
