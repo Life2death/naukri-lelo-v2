@@ -3,7 +3,7 @@ import { useApp } from "@/contexts";
 import { getAllProfiles } from "@/lib";
 import { InterviewProfile } from "@/types";
 import { CheckIcon, UserCircle2Icon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export const ProfileSelector = () => {
   const { activeProfileId, setActiveProfileId } = useApp();
