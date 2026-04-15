@@ -1,8 +1,9 @@
 export type JobProviderId = "tavily" | "serper";
 
 export interface JobProviderConfig {
-  provider: JobProviderId;
-  apiKey: string;
+  activeProvider: JobProviderId;
+  tavilyKey: string;
+  serperKey: string;
 }
 
 export interface JobListing {

@@ -8,7 +8,8 @@ const MAX_WIDTH = 1400;
 const WIDTH_STEP = 100;
 const DEFAULT_WIDTH = 600;
 const COLLAPSED_HEIGHT = 54;
-const EXPANDED_HEIGHT = 600;
+export const EXPANDED_HEIGHT = 600;
+export const LARGE_HEIGHT = 900;
 
 const getStoredWidth = (): number => {
   try {
@@ -125,6 +126,7 @@ export const useWindowResize = () => {
 
   return {
     resizeWindow,
+    applySize,
     overlayWidth,
     increaseWidth,
     decreaseWidth,

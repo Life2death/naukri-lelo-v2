@@ -124,10 +124,10 @@ export async function searchJobs(
   config: JobProviderConfig,
   query: string
 ): Promise<JobListing[]> {
-  if (config.provider === "tavily") {
-    return searchViaTavily(config.apiKey, query);
+  if (config.activeProvider === "tavily") {
+    return searchViaTavily(config.tavilyKey, query);
   }
-  return searchViaSerper(config.apiKey, query);
+  return searchViaSerper(config.serperKey, query);
 }
 
 /**
@@ -137,7 +137,7 @@ export async function searchJobs(
 export function buildJobQuery(
   titleOrKeywords: string,
   location: string,
-  profileGoals?: string
+  skills?: string[]
 ): string {
   const parts: string[] = [];
 
@@ -145,10 +145,8 @@ export function buildJobQuery(
     parts.push(titleOrKeywords.trim());
   }
 
-  // Extract key skills from job description (first 200 chars)
-  if (profileGoals) {
-    const skills = extractTopSkills(profileGoals, 5);
-    if (skills.length > 0) parts.push(`skills: ${skills.join(", ")}`);
+  if (skills && skills.length > 0) {
+    parts.push(`skills: ${skills.slice(0, 6).join(", ")}`);
   }
 
   if (location.trim()) parts.push(`in ${location.trim()}`);
@@ -235,15 +233,17 @@ function extractDomainLabel(url: string): string {
   }
 }
 
-const SKILL_KEYWORDS = [
+export const SKILL_KEYWORDS = [
   "react","vue","angular","typescript","javascript","python","java","golang","rust",
   "node","express","nextjs","graphql","rest","sql","postgres","mysql","mongodb",
   "redis","aws","gcp","azure","docker","kubernetes","terraform","ci/cd","git",
   "linux","android","ios","swift","kotlin","flutter","dart","ruby","rails",
   "django","fastapi","spring","c++","c#",".net","php","laravel","scala",
+  "kafka","rabbitmq","elasticsearch","redis","spark","hadoop","airflow","mlops",
+  "pytorch","tensorflow","scikit-learn","pandas","numpy","openai","llm","langchain",
 ];
 
-function extractTopSkills(text: string, max: number): string[] {
+export function extractTopSkills(text: string, max: number = 10): string[] {
   const lower = text.toLowerCase();
   return SKILL_KEYWORDS
     .filter((k) => lower.includes(k))

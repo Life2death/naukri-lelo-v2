@@ -14,6 +14,8 @@ import {
   CameraIcon,
   PlusIcon,
   XIcon,
+  Maximize2Icon,
+  Minimize2Icon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ModeSwitcher } from "./ModeSwitcher";
@@ -23,7 +25,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import { PermissionFlow } from "./PermissionFlow";
 import { QuickActions } from "./QuickActions";
 import { Warning } from "./Warning";
-import { useSystemAudioType } from "@/hooks";
+import { useSystemAudioType, EXPANDED_HEIGHT, LARGE_HEIGHT } from "@/hooks";
 import { useApp } from "@/contexts";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +49,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
     startNewConversation,
     conversation,
     resizeWindow,
+    applySize,
+    overlayWidth,
     quickActions,
     addQuickAction,
     removeQuickAction,
@@ -71,6 +75,15 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
   // View mode toggle
   const [conversationMode, setConversationMode] = useState(false);
+
+  // Maximize reading area toggle
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  const handleToggleMaximize = useCallback(async () => {
+    const next = !isMaximized;
+    setIsMaximized(next);
+    await applySize(overlayWidth, next ? LARGE_HEIGHT : EXPANDED_HEIGHT);
+  }, [isMaximized, applySize, overlayWidth]);
 
   // Screenshot state
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
@@ -264,6 +277,23 @@ export const SystemAudio = (props: useSystemAudioType) => {
                     </Button>
                   )}
 
+                  {/* Maximize / Minimize reading area */}
+                  {!setupRequired && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6"
+                      title={isMaximized ? "Minimize reading area" : "Maximize reading area"}
+                      onClick={handleToggleMaximize}
+                    >
+                      {isMaximized ? (
+                        <Minimize2Icon className="h-3.5 w-3.5" />
+                      ) : (
+                        <Maximize2Icon className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  )}
+
                   {/* Close Button */}
                   {!capturing && (
                     <Button
@@ -272,6 +302,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       className="h-6 w-6"
                       title="Close"
                       onClick={() => {
+                        setIsMaximized(false);
                         setIsPopoverOpen(false);
                         resizeWindow(false);
                       }}

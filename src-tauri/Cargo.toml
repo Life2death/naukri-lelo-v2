@@ -1,6 +1,6 @@
 [package]
 name = "naukri-lelo"
-version = "0.1.17"
+version = "0.1.18"
 description = "Naukri Lelo - Free, open-source AI interview assistant that stays invisible during screen sharing. BYOK, real-time transcription, stealth mode."
 authors = ["life2death"]
 license = "GPL-3.0"
