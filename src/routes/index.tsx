@@ -13,6 +13,7 @@ import {
   Responses,
   Profiles,
   PrepSession,
+  Jobs,
 } from "@/pages";
 import { DashboardLayout } from "@/layouts";
 
@@ -34,6 +35,7 @@ export default function AppRoutes() {
           <Route path="/dev-space" element={<DevSpace />} />
           <Route path="/profiles" element={<Profiles />} />
           <Route path="/profiles/:id/prep" element={<PrepSession />} />
+          <Route path="/jobs" element={<Jobs />} />
         </Route>
       </Routes>
     </Router>

@@ -7,3 +7,4 @@ export * from "./completion";
 export * from "./system-prompts";
 export * from "./shortcuts";
 export * from "./interview-profile";
+export * from "./job";
