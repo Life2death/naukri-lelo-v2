@@ -1,6 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { STORAGE_KEYS } from "@/config";
+
+const MIN_WIDTH = 400;
+const MAX_WIDTH = 1400;
+const WIDTH_STEP = 100;
+const DEFAULT_WIDTH = 600;
+const COLLAPSED_HEIGHT = 54;
+const EXPANDED_HEIGHT = 600;
+
+const getStoredWidth = (): number => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.OVERLAY_WIDTH);
+    if (!stored) return DEFAULT_WIDTH;
+    const n = parseInt(stored, 10);
+    return isNaN(n) ? DEFAULT_WIDTH : Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
+  } catch {
+    return DEFAULT_WIDTH;
+  }
+};
 
 // Helper function to check if any popover is open in the DOM
 const isAnyPopoverOpen = (): boolean => {
@@ -11,23 +30,48 @@ const isAnyPopoverOpen = (): boolean => {
 };
 
 export const useWindowResize = () => {
-  const resizeWindow = useCallback(async (expanded: boolean) => {
+  const [overlayWidth, setOverlayWidth] = useState<number>(getStoredWidth);
+
+  const applySize = useCallback(async (width: number, height: number) => {
     try {
       const window = getCurrentWebviewWindow();
-
-      if (!expanded && isAnyPopoverOpen()) {
-        return;
-      }
-
-      const newHeight = expanded ? 600 : 54;
-
-      await invoke("set_window_height", {
-        window,
-        height: newHeight,
-      });
+      await invoke("set_overlay_size", { window, width, height });
     } catch (error) {
       console.error("Failed to resize window:", error);
     }
+  }, []);
+
+  const resizeWindow = useCallback(
+    async (expanded: boolean) => {
+      if (!expanded && isAnyPopoverOpen()) return;
+      const height = expanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
+      await applySize(overlayWidth, height);
+    },
+    [overlayWidth, applySize]
+  );
+
+  const changeWidth = useCallback(
+    async (delta: number) => {
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, overlayWidth + delta));
+      if (newWidth === overlayWidth) return;
+      setOverlayWidth(newWidth);
+      try {
+        localStorage.setItem(STORAGE_KEYS.OVERLAY_WIDTH, String(newWidth));
+      } catch {}
+      // Keep current height — collapsed (54) unless a popover is open
+      const currentHeight = isAnyPopoverOpen() ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
+      await applySize(newWidth, currentHeight);
+    },
+    [overlayWidth, applySize]
+  );
+
+  const increaseWidth = useCallback(() => changeWidth(WIDTH_STEP), [changeWidth]);
+  const decreaseWidth = useCallback(() => changeWidth(-WIDTH_STEP), [changeWidth]);
+
+  // Apply stored width on first mount so the window matches the saved preference
+  useEffect(() => {
+    applySize(overlayWidth, COLLAPSED_HEIGHT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Setup drag handling and popover monitoring
@@ -79,7 +123,14 @@ export const useWindowResize = () => {
     };
   }, [resizeWindow]);
 
-  return { resizeWindow };
+  return {
+    resizeWindow,
+    overlayWidth,
+    increaseWidth,
+    decreaseWidth,
+    minWidth: MIN_WIDTH,
+    maxWidth: MAX_WIDTH,
+  };
 };
 
 interface UseWindowFocusOptions {

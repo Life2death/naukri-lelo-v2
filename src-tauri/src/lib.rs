@@ -50,8 +50,15 @@ pub fn run() {
         format!("step1: Naukri Lelo v{} binary started", env!("CARGO_PKG_VERSION")),
     );
 
-    // Get PostHog API key
-    let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
+    // PostHog telemetry — only active when the maintainer compiles with a key.
+    // Open-source / community builds ship without POSTHOG_API_KEY so both the
+    // PostHog plugin and machine-uid plugin are never registered.  No data is
+    // ever collected from end-user builds.
+    let posthog_api_key = option_env!("POSTHOG_API_KEY")
+        .unwrap_or("")
+        .to_string();
+    let telemetry_enabled = !posthog_api_key.is_empty();
+
     let mut builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -81,17 +88,24 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_keychain::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(posthog_init(PostHogConfig {
-            api_key: posthog_api_key,
-            options: Some(PostHogOptions {
-                disable_session_recording: Some(true),
-                capture_pageview: Some(false),
-                capture_pageleave: Some(false),
+        ;
+
+    // Conditionally register telemetry plugins — only when built with a key
+    if telemetry_enabled {
+        builder = builder
+            .plugin(posthog_init(PostHogConfig {
+                api_key: posthog_api_key,
+                options: Some(PostHogOptions {
+                    disable_session_recording: Some(true),
+                    capture_pageview: Some(false),
+                    capture_pageleave: Some(false),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        }))
-        .plugin(tauri_plugin_machine_uid::init());
+            }))
+            .plugin(tauri_plugin_machine_uid::init());
+    }
+
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_nspanel::init());
@@ -100,6 +114,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             window::set_window_height,
+            window::set_overlay_size,
             window::open_dashboard,
             window::toggle_dashboard,
             window::move_window,

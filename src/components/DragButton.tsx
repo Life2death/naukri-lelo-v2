@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { GripVerticalIcon } from "lucide-react";
+import { GripVerticalIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useApp } from "@/contexts";
 import {
   GetLicense,
@@ -13,7 +13,8 @@ import { useWindowResize } from "@/hooks";
 export const DragButton = () => {
   const { hasActiveLicense } = useApp();
   const [isOpen, setIsOpen] = useState(false);
-  const { resizeWindow } = useWindowResize();
+  const { resizeWindow, overlayWidth, increaseWidth, decreaseWidth, minWidth, maxWidth } =
+    useWindowResize();
 
   useEffect(() => {
     if (!hasActiveLicense) {
@@ -54,13 +55,41 @@ export const DragButton = () => {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className={`-ml-[2px] w-fit`}
-      data-tauri-drag-region={hasActiveLicense}
-    >
-      <GripVerticalIcon className="h-4 w-4" />
-    </Button>
+    <div className="flex items-center gap-0.5 -ml-[2px]">
+      {/* Width decrease */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-5 p-0 opacity-40 hover:opacity-100 transition-opacity"
+        title={`Narrow overlay (${overlayWidth}px → ${overlayWidth - 100}px)`}
+        onClick={decreaseWidth}
+        disabled={overlayWidth <= minWidth}
+      >
+        <ChevronLeftIcon className="h-3 w-3" />
+      </Button>
+
+      {/* Drag handle */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="w-fit"
+        data-tauri-drag-region={true}
+        title="Drag to move"
+      >
+        <GripVerticalIcon className="h-4 w-4" />
+      </Button>
+
+      {/* Width increase */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-5 p-0 opacity-40 hover:opacity-100 transition-opacity"
+        title={`Widen overlay (${overlayWidth}px → ${overlayWidth + 100}px)`}
+        onClick={increaseWidth}
+        disabled={overlayWidth >= maxWidth}
+      >
+        <ChevronRightIcon className="h-3 w-3" />
+      </Button>
+    </div>
   );
 };

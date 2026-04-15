@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Naukri Lelo",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "identifier": "com.naukrilelo.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,7 +29,9 @@
         "shadow": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: ipc: http://ipc.localhost; worker-src blob:; media-src 'self' blob:; font-src 'self' data:;"
+    }
   },
   "bundle": {
     "active": true,

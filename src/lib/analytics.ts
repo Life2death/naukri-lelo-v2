@@ -11,7 +11,9 @@ export const ANALYTICS_EVENTS = {
 } as const;
 
 /**
- * Capture an analytics event
+ * Capture an analytics event.
+ * This is a no-op in open-source builds — the PostHog plugin is only
+ * registered when compiled with a POSTHOG_API_KEY (official releases only).
  */
 export const captureEvent = async (
   eventName: string,
@@ -19,9 +21,8 @@ export const captureEvent = async (
 ) => {
   try {
     await PostHog.capture(eventName, properties || {});
-  } catch (error) {
-    // Silently fail - we don't want analytics to break the app
-    console.debug("Analytics event failed:", eventName, error);
+  } catch {
+    // Silently ignore — PostHog plugin is not loaded in community builds
   }
 };
 

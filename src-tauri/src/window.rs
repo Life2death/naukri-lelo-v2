@@ -73,13 +73,26 @@ pub fn center_window_completely(window: &WebviewWindow) -> Result<(), Box<dyn st
 #[tauri::command]
 pub fn set_window_height(window: tauri::WebviewWindow, height: u32) -> Result<(), String> {
     use tauri::{LogicalSize, Size};
-
-    // Simply set the window size with fixed width and new height
     let new_size = LogicalSize::new(600.0, height as f64);
     window
         .set_size(Size::Logical(new_size))
         .map_err(|e| format!("Failed to resize window: {}", e))?;
+    Ok(())
+}
 
+/// Resize the overlay to an explicit width × height (both in logical pixels).
+/// Called by the React width controls so the user can make the bar wider/narrower.
+#[tauri::command]
+pub fn set_overlay_size(
+    window: tauri::WebviewWindow,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    use tauri::{LogicalSize, Size};
+    let new_size = LogicalSize::new(width as f64, height as f64);
+    window
+        .set_size(Size::Logical(new_size))
+        .map_err(|e| format!("Failed to resize overlay: {}", e))?;
     Ok(())
 }
 
