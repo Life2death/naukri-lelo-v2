@@ -28,6 +28,8 @@ const NOW = 1_700_000_000_000;
 const dbRow = {
   id: "profile_1_abc",
   name: "Senior React Engineer",
+  first_name: "",
+  persona_text: "",
   resume_text: "5 years React experience",
   resume_file_name: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
@@ -121,6 +123,8 @@ describe("interview-profiles.action", () => {
         [
           expectedProfile.id,
           expectedProfile.name,
+          expectedProfile.firstName,
+          expectedProfile.persona,
           expectedProfile.resumeText,
           expectedProfile.resumeFileName,
           expectedProfile.goals,
@@ -148,6 +152,8 @@ describe("interview-profiles.action", () => {
         expect.stringContaining("UPDATE interview_profiles"),
         [
           updated.name,
+          updated.firstName,
+          updated.persona,
           updated.resumeText,
           updated.resumeFileName,
           updated.goals,

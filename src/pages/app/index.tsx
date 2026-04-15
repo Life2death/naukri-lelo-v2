@@ -13,7 +13,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { ErrorBoundary } from "react-error-boundary";
 import { ErrorLayout } from "@/layouts";
 import { getPlatform } from "@/lib";
-import { exit } from "@tauri-apps/plugin-process";
 
 const App = () => {
   const { isHidden, systemAudio } = useApp();
@@ -30,7 +29,7 @@ const App = () => {
 
   const handleQuit = async () => {
     try {
-      await exit(0);
+      await invoke("exit_app");
     } catch (error) {
       console.error("Failed to quit app:", error);
     }

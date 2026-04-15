@@ -16,6 +16,9 @@ import {
   CONVERSATION_SAVE_DEBOUNCE_MS,
   generateConversationId,
   generateMessageId,
+  getProfileById,
+  buildProfileKnowledgeContext,
+  loadProfileRefConvTexts,
 } from "@/lib";
 import { Message } from "@/types/completion";
 
@@ -96,6 +99,8 @@ export function useSystemAudio() {
   // Context management states
   const [useSystemPrompt, setUseSystemPrompt] = useState<boolean>(true);
   const [contextContent, setContextContent] = useState<string>("");
+  // Name of the profile whose context is currently injected (null = none)
+  const [profileContextName, setProfileContextName] = useState<string | null>(null);
 
   const {
     selectedSttProvider,
@@ -104,7 +109,13 @@ export function useSystemAudio() {
     allAiProviders,
     systemPrompt,
     selectedAudioDevices,
+    activeProfileId,
   } = useApp();
+
+  // Refs to avoid stale closures in the speech-detected event listener
+  const useSystemPromptRef = useRef<boolean>(true);
+  const contextContentRef = useRef<string>("");
+  const systemPromptRef = useRef<string>("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
@@ -154,6 +165,55 @@ export function useSystemAudio() {
       setQuickActions(DEFAULT_QUICK_ACTIONS);
     }
   }, []);
+
+  // Keep refs in sync so the speech-detected listener always reads current values
+  useEffect(() => { useSystemPromptRef.current = useSystemPrompt; }, [useSystemPrompt]);
+  useEffect(() => { contextContentRef.current = contextContent; }, [contextContent]);
+  useEffect(() => { systemPromptRef.current = systemPrompt; }, [systemPrompt]);
+
+  // Auto-inject profile context into the speech path when a profile is selected
+  useEffect(() => {
+    if (!activeProfileId) {
+      // Profile deselected: restore system-prompt mode without touching localStorage
+      setUseSystemPrompt(true);
+      setContextContent("");
+      setProfileContextName(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getProfileById(activeProfileId);
+        if (!profile || cancelled) return;
+        const refTexts = await loadProfileRefConvTexts(activeProfileId);
+        if (cancelled) return;
+        const context = buildProfileKnowledgeContext(profile, refTexts);
+        // Use raw setters — NOT the localStorage-persisting wrappers
+        setContextContent(context);
+        setUseSystemPrompt(false);
+        setProfileContextName(profile.name);
+      } catch (err) {
+        console.error("Failed to load profile context for speech path:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProfileId]);
+
+  // Allows the UI to re-apply profile context after manual edits
+  const restoreProfileContext = useCallback(async () => {
+    if (!activeProfileId) return;
+    try {
+      const profile = await getProfileById(activeProfileId);
+      if (!profile) return;
+      const refTexts = await loadProfileRefConvTexts(activeProfileId);
+      const context = buildProfileKnowledgeContext(profile, refTexts);
+      setContextContent(context);
+      setUseSystemPrompt(false);
+    } catch (err) {
+      console.error("Failed to restore profile context:", err);
+    }
+  }, [activeProfileId]);
 
   // Handle continuous recording progress events AND error events
   useEffect(() => {
@@ -274,9 +334,10 @@ export function useSystemAudio() {
                 setLastTranscription(transcription);
                 setError("");
 
-                const effectiveSystemPrompt = useSystemPrompt
-                  ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                  : contextContent || DEFAULT_SYSTEM_PROMPT;
+                // Use refs to avoid stale closure — always reflects current toggle state
+                const effectiveSystemPrompt = useSystemPromptRef.current
+                  ? systemPromptRef.current || DEFAULT_SYSTEM_PROMPT
+                  : contextContentRef.current || DEFAULT_SYSTEM_PROMPT;
 
                 const previousMessages = conversation.messages.map((msg) => {
                   return { role: msg.role, content: msg.content };
@@ -898,6 +959,9 @@ export function useSystemAudio() {
     setUseSystemPrompt: updateUseSystemPrompt,
     contextContent,
     setContextContent: updateContextContent,
+    // Name of the currently injected profile context (null when none selected)
+    profileContextName,
+    restoreProfileContext,
     startNewConversation,
     // Window resize
     resizeWindow,

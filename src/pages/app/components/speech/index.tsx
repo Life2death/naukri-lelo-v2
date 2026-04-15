@@ -63,6 +63,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
     startContinuousRecording,
     ignoreContinuousRecording,
     scrollAreaRef,
+    profileContextName,
+    restoreProfileContext,
   } = props;
 
   const { hasActiveLicense, supportsImages } = useApp();
@@ -366,6 +368,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
+                      profileContextName={profileContextName}
+                      onRestoreProfileContext={restoreProfileContext}
                     />
 
                     {/* Help/Keyboard Shortcuts */}

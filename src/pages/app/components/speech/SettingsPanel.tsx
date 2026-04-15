@@ -60,6 +60,10 @@ interface SettingsPanelProps {
   setUseSystemPrompt: (value: boolean) => void;
   contextContent: string;
   setContextContent: (content: string) => void;
+  // Active profile name (when profile is selected in overlay)
+  profileContextName?: string | null;
+  // Called when user clicks "Re-apply" to restore the profile context
+  onRestoreProfileContext?: () => void;
 }
 
 export const SettingsPanel = ({
@@ -69,6 +73,8 @@ export const SettingsPanel = ({
   setUseSystemPrompt,
   contextContent,
   setContextContent,
+  profileContextName,
+  onRestoreProfileContext,
 }: SettingsPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -100,6 +106,11 @@ export const SettingsPanel = ({
   };
 
   const handleTemplateSelection = (templateId: string) => {
+    if (templateId === "__profile_restore__") {
+      onRestoreProfileContext?.();
+      setSelectedTemplate("");
+      return;
+    }
     const template = getPromptTemplateById(templateId);
     if (template) {
       setContextContent(template.prompt);
@@ -220,12 +231,24 @@ export const SettingsPanel = ({
               AI Context
             </h4>
 
+            {/* Profile active badge */}
+            {profileContextName && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 border border-primary/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+                <p className="text-[10px] text-primary font-medium truncate">
+                  Profile active: {profileContextName}
+                </p>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
                 <Label className="text-xs font-medium">Use System Prompt</Label>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {useSystemPrompt
                     ? "Using default prompt from settings"
+                    : profileContextName
+                    ? `Using profile context for ${profileContextName}`
                     : "Using custom context below"}
                 </p>
               </div>
@@ -248,6 +271,19 @@ export const SettingsPanel = ({
                       <SelectValue placeholder="Templates" />
                     </SelectTrigger>
                     <SelectContent>
+                      {profileContextName && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs py-1">
+                            Current Profile
+                          </SelectLabel>
+                          <SelectItem
+                            value="__profile_restore__"
+                            className="text-xs font-medium text-primary"
+                          >
+                            Re-apply: {profileContextName}
+                          </SelectItem>
+                        </SelectGroup>
+                      )}
                       <SelectGroup>
                         <SelectLabel className="text-xs py-1">
                           Quick-fill a template
