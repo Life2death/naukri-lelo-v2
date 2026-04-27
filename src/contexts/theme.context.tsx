@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { STORAGE_KEYS } from "@/config/";
+import { emit, listen } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 type Theme = "dark" | "light" | "system";
 
@@ -56,6 +58,25 @@ export function ThemeProvider({
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [storageKey]);
 
+  // Listen for cross-window transparency changes emitted by the dashboard.
+  // The storage event is unreliable across separate Tauri WebView2 windows on
+  // Windows, so we use Tauri's event system as the authoritative channel.
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    listen<{ transparency: number }>("transparency-changed", (event) => {
+      setTransparency(event.payload.transparency);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(console.error);
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   useEffect(() => {
     const root = window.document.documentElement;
 
@@ -108,6 +129,8 @@ export function ThemeProvider({
   const onSetTransparency = (transparency: number) => {
     localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, transparency.toString());
     setTransparency(transparency);
+    // Broadcast to all other Tauri windows (e.g. the main toolbar overlay).
+    emit("transparency-changed", { transparency }).catch(console.error);
   };
 
   const value = {

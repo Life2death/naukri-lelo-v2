@@ -1,4 +1,4 @@
-import { useApp, useTheme } from "@/contexts";
+import { useApp } from "@/contexts";
 import { Header, Label, Slider, Button } from "@/components";
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import {
@@ -8,9 +8,34 @@ import {
   DropdownMenuTrigger,
 } from "@/components";
 
-export const Theme = () => {
-  const { theme, transparency, setTheme, onSetTransparency } = useTheme();
+type ThemeValue = "dark" | "light" | "system";
+
+interface ThemeProps {
+  pendingTheme: ThemeValue;
+  pendingTransparency: number;
+  onThemeChange: (theme: ThemeValue) => void;
+  onTransparencyChange: (transparency: number) => void;
+}
+
+export const Theme = ({
+  pendingTheme,
+  pendingTransparency,
+  onThemeChange,
+  onTransparencyChange,
+}: ThemeProps) => {
   const { hasActiveLicense } = useApp();
+
+  const handleTransparencyChange = (value: number[]) => {
+    const next = value[0];
+    onTransparencyChange(next);
+    // Live CSS preview without committing to localStorage yet
+    const opacity = (100 - next) / 100;
+    document.documentElement.style.setProperty("--opacity", opacity.toString());
+    document.documentElement.style.setProperty(
+      "--backdrop-blur",
+      next > 0 ? "blur(12px)" : "none"
+    );
+  };
 
   return (
     <div id="theme" className="relative space-y-3">
@@ -34,12 +59,12 @@ export const Theme = () => {
           <div className="flex items-center space-x-3">
             <div>
               <Label className="text-sm font-medium flex items-center gap-2">
-                {theme === "system" ? (
+                {pendingTheme === "system" ? (
                   <>
                     <MonitorIcon className="h-4 w-4" />
                     System
                   </>
-                ) : theme === "light" ? (
+                ) : pendingTheme === "light" ? (
                   <>
                     <SunIcon className="h-4 w-4" />
                     Light Mode
@@ -52,7 +77,7 @@ export const Theme = () => {
                 )}
               </Label>
               <p className="text-xs text-muted-foreground mt-1">
-                {theme === "light"
+                {pendingTheme === "light"
                   ? "Using light theme for better visibility in bright environments"
                   : "Using dark theme for comfortable viewing in low light"}
               </p>
@@ -61,7 +86,7 @@ export const Theme = () => {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon">
-                {theme === "system" ? (
+                {pendingTheme === "system" ? (
                   <MonitorIcon className="h-[1.2rem] w-[1.2rem]" />
                 ) : (
                   <>
@@ -72,13 +97,13 @@ export const Theme = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setTheme("light")}>
+              <DropdownMenuItem onClick={() => onThemeChange("light")}>
                 Light
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("dark")}>
+              <DropdownMenuItem onClick={() => onThemeChange("dark")}>
                 Dark
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("system")}>
+              <DropdownMenuItem onClick={() => onThemeChange("system")}>
                 System
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -99,18 +124,21 @@ export const Theme = () => {
         <div className="space-y-3">
           <div className="flex items-center gap-4 mt-4">
             <Slider
-              value={[transparency]}
-              onValueChange={(value: number[]) => onSetTransparency(value[0])}
+              value={[pendingTransparency]}
+              onValueChange={handleTransparencyChange}
               min={0}
               max={100}
               step={1}
               className="flex-1"
             />
+            <span className="text-sm text-muted-foreground w-10 text-right">
+              {pendingTransparency}%
+            </span>
           </div>
 
           <p className="text-xs text-muted-foreground/70">
-            💡 Tip: Higher transparency lets you see through the window, perfect
-            for dark overlay. Changes apply immediately.
+            Higher transparency lets you see through the window. Click Save to
+            apply to the overlay.
           </p>
         </div>
       </div>

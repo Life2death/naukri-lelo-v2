@@ -118,7 +118,9 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    /* Allow --opacity to punch through to the OS-transparent window */
+    background-color: rgb(from var(--background) r g b / var(--opacity, 1));
+    @apply text-foreground;
   }
 }
 
