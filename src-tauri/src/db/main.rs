@@ -31,5 +31,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("migrations/interview-profiles-v2.sql"),
             kind: MigrationKind::Up,
         },
+        // Migration 5: Add first_name and persona_text to interview_profiles
+        Migration {
+            version: 5,
+            description: "add_first_name_and_persona_to_profiles",
+            sql: include_str!("migrations/interview-profiles-v3.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
