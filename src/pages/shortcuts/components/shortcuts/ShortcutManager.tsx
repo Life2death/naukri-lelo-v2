@@ -181,7 +181,6 @@ export const ShortcutManager = () => {
             key: getPlatformDefaultKey(action),
             enabled: true,
           };
-          const isLocked = false;
           const isEditing = editingAction === action.id;
 
           return (
