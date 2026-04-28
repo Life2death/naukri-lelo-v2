@@ -1,7 +1,7 @@
 {
   "name": "naukri-lelo",
   "private": false,
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Naukri Lelo - Free, open-source AI interview assistant that stays invisible during screen sharing. BYOK, real-time transcription, stealth mode. No subscriptions ever.",
   "author": {
     "name": "life2death",

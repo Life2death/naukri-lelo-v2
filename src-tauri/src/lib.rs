@@ -176,8 +176,7 @@ pub fn run() {
                 let sep = PredefinedMenuItem::separator(app)?;
                 let menu = Menu::with_items(app, &[&open_item, &sep, &quit_item])?;
 
-                let tray = tauri::tray::TrayIconBuilder::new()
-                    .id("main-tray") // stable ID so set_app_icon_visibility can retrieve it
+                let tray = tauri::tray::TrayIconBuilder::with_id("main-tray") // stable ID so set_app_icon_visibility can retrieve it
                     .icon(app.default_window_icon().unwrap().clone())
                     .menu(&menu)
                     .menu_on_left_click(false)

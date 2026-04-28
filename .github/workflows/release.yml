@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag to release (e.g. v0.1.1)"
+        description: "Version tag to release (e.g. v2.0.0)"
         required: false
-        default: "v0.1.1"
+        default: "v2.0.0"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,84 +20,6 @@ permissions:
   contents: write
 
 jobs:
-  # ── Linux build ───────────────────────────────────────────────────────────────
-  build-linux:
-    name: Linux (.deb / .rpm / .AppImage)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            wget \
-            pkg-config \
-            libssl-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libpulse-dev \
-            libdbus-1-dev \
-            libasound2-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxcomposite-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxdo-dev \
-            rpm
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Set up Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Build Tauri app – Linux
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Naukri Lelo ${{ github.ref_name }}"
-          releaseBody: |
-            ## Naukri Lelo ${{ github.ref_name }}
-
-            Free, open-source AI interview assistant. Invisible during screen sharing.
-            BYOK — bring your own API key (OpenRouter free tier works out of the box).
-
-            ### Installation
-            - **Linux**: Download `.AppImage` (portable) or `.deb` / `.rpm` for your distro
-            - **macOS**: Download `.dmg`, open it and drag to Applications
-            - **Windows**: Download `.exe` installer and run it
-
-            ### Getting Started
-            1. Open the app
-            2. Go to **Dev Space** → enter your free [OpenRouter](https://openrouter.ai/keys) key
-            3. For voice transcription, enter your free [Groq](https://console.groq.com/keys) key
-            4. Press `Ctrl+\` to toggle the overlay
-          releaseDraft: true
-          prerelease: false
-          args: --target x86_64-unknown-linux-gnu
-
   # ── Windows build ─────────────────────────────────────────────────────────────
   build-windows:
     name: Windows (.exe / .msi)
@@ -134,56 +56,30 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Naukri Lelo ${{ github.ref_name }}"
-          releaseBody: "See Linux release notes above."
+          releaseBody: |
+            ## Naukri Lelo ${{ github.ref_name }}
+
+            Free, open-source AI interview assistant. Invisible during screen sharing.
+            BYOK — bring your own API key (OpenRouter free tier works out of the box).
+
+            ### Installation
+            - **Windows**: Download `Naukri.Lelo_*_x64-setup.exe` and run it.
+
+            ### Getting Started
+            1. Open the app
+            2. Go to **Dev Space** → enter your free [OpenRouter](https://openrouter.ai/keys) key
+            3. For voice transcription, enter your free [Groq](https://console.groq.com/keys) key
+            4. Press `Ctrl+\` to toggle the overlay
+
+            > Linux and macOS builds coming soon.
           releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc
 
-  # ── macOS build ─────────────────────────────────────── (coming soon) ─────────
-  # macOS build is temporarily disabled. Re-enable by removing `if: false`.
-  # Requires: Apple Developer account ($99/yr), cidre macOS SDK setup.
-  build-macos:
-    name: macOS (.dmg universal)
-    if: false
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+  # ── Linux build ─────────────────────────────────── (coming soon) ────────────
+  # Re-enable when Linux support is ready.
+  # build-linux: (disabled)
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Set up Rust (stable) with Apple targets
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Build Tauri app – macOS Universal
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: notarization & code signing (configure in repo secrets)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Naukri Lelo ${{ github.ref_name }}"
-          releaseBody: "See Linux release notes above."
-          releaseDraft: true
-          prerelease: false
-          # universal-apple-darwin builds a single binary for both Intel + Apple Silicon
-          args: --target universal-apple-darwin
+  # ── macOS build ──────────────────────────────────── (coming soon) ───────────
+  # Re-enable when macOS support is ready.
+  # build-macos: (disabled)
