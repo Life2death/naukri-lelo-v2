@@ -12,22 +12,22 @@ BG_COLOR = (37, 99, 235)   # #2563EB  blue
 FG_COLOR = (255, 255, 255)  # white
 
 def create_png_bytes(width, height, pixels_rgb):
-    """Encode a flat list of (r,g,b) tuples as a PNG binary."""
+    """Encode a flat list of (r,g,b) tuples as an RGBA PNG binary (alpha=255)."""
 
     def make_chunk(tag, data):
         crc_val = zlib.crc32(tag + data) & 0xFFFFFFFF
         return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', crc_val)
 
-    # IHDR
-    ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+    # IHDR — color type 6 = RGBA
+    ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)
 
-    # Raw scanlines: filter-byte 0 before each row
+    # Raw scanlines: filter-byte 0 before each row, RGBA bytes
     raw = bytearray()
     for y in range(height):
         raw.append(0)  # filter None
         for x in range(width):
             r, g, b = pixels_rgb[y * width + x]
-            raw += bytes([r, g, b])
+            raw += bytes([r, g, b, 255])  # fully opaque alpha
 
     idat_data = zlib.compress(bytes(raw), 9)
 
