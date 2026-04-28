@@ -23,14 +23,14 @@ export const AppIconToggle = ({ className }: AppIconToggleProps) => {
         <div className="flex items-center space-x-3">
           <div>
             <Label className="text-sm font-medium">
-              {!customizable.appIcon.isVisible
-                ? "Show Icon in Dock/Taskbar"
-                : "Hide Icon from Dock/Taskbar"}
+              {customizable.appIcon.isVisible
+                ? "Tray Icon Visible"
+                : "Tray Icon Hidden"}
             </Label>
             <p className="text-xs text-muted-foreground mt-1">
-              {`Toggle to make App Icon ${
-                !customizable.appIcon.isVisible ? "Visible" : "Hidden"
-              }`}
+              {customizable.appIcon.isVisible
+                ? "App icon is shown in the system tray. Toggle off to hide it."
+                : "App icon is hidden from the system tray. Toggle on to show it."}
             </p>
           </div>
         </div>

@@ -487,45 +487,41 @@ pub fn set_license_status<R: Runtime>(_app: AppHandle<R>, _has_license: bool) ->
     Ok(())
 }
 
-/// Tauri command to set app icon visibility in dock/taskbar
+/// Tauri command to set app icon visibility in dock / system tray.
+///
+/// macOS  → activation policy (Regular = show in Dock, Accessory = hide)
+/// Windows/Linux → show or hide the system-tray icon directly.
+///
+/// NOTE: the main overlay window already has `skipTaskbar: true` permanently,
+/// so `set_skip_taskbar` on the main window is always a no-op.  The correct
+/// target on Windows/Linux is the tray icon, identified by "main-tray".
 #[tauri::command]
 pub fn set_app_icon_visibility<R: Runtime>(app: AppHandle<R>, visible: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        // On macOS, use activation policy to control dock icon
         let policy = if visible {
             tauri::ActivationPolicy::Regular
         } else {
             tauri::ActivationPolicy::Accessory
         };
-
         app.set_activation_policy(policy).map_err(|e| {
             eprintln!("Failed to set activation policy: {}", e);
             format!("Failed to set activation policy: {}", e)
         })?;
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
-        // On Windows, control taskbar icon visibility
-        if let Some(window) = app.get_webview_window("main") {
-            window
-                .set_skip_taskbar(!visible)
-                .map_err(|e| format!("Failed to set taskbar visibility: {}", e))?;
-        } else {
-            eprintln!("Main window not found on Windows");
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // On Linux, control panel icon visibility
-        if let Some(window) = app.get_webview_window("main") {
-            window
-                .set_skip_taskbar(!visible)
-                .map_err(|e| format!("Failed to set panel visibility: {}", e))?;
-        } else {
-            eprintln!("Main window not found on Linux");
+        // The tray icon was built with .id("main-tray") in lib.rs so we can
+        // retrieve it here and toggle its visibility.
+        match app.tray_by_id("main-tray") {
+            Some(tray) => {
+                tray.set_visible(visible)
+                    .map_err(|e| format!("Failed to set tray icon visibility: {}", e))?;
+            }
+            None => {
+                eprintln!("set_app_icon_visibility: tray icon 'main-tray' not found");
+            }
         }
     }
 
