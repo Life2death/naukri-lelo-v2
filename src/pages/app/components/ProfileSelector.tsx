@@ -1,6 +1,7 @@
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@/components";
 import { useApp } from "@/contexts";
 import { getAllProfiles } from "@/lib";
+import { useWindowResize } from "@/hooks";
 import { InterviewProfile } from "@/types";
 import { CheckIcon, UserCircle2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
@@ -9,10 +10,13 @@ export const ProfileSelector = () => {
   const { activeProfileId, setActiveProfileId } = useApp();
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
   const [open, setOpen] = useState(false);
+  const { resizeWindow } = useWindowResize();
 
-  // Load profiles on first open (lazy)
+  // Load profiles on first open (lazy) and expand the overlay window so the
+  // popover is not clipped by the 54 px default window height.
   const handleOpen = async (val: boolean) => {
     setOpen(val);
+    resizeWindow(val);
     if (val && profiles.length === 0) {
       try {
         const data = await getAllProfiles();
