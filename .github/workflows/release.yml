@@ -1,90 +1,41 @@
-name: Build & Release Installers
-
+name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Version tag to release (e.g. v2.0.0)"
-        required: false
-        default: "v2.0.0"
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
-
-# Required for tauri-action to create GitHub releases and upload assets
-permissions:
-  contents: write
+      - "v*"
 
 jobs:
-  # ── Windows build ─────────────────────────────────────────────────────────────
-  build-windows:
-    name: Windows (.exe / .msi)
-    runs-on: windows-latest
+  release:
+    strategy:
+      matrix:
+        platform: [windows-latest]
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 26
+          cache: npm
 
-      - name: Install frontend dependencies
+      - name: Install frontend deps
         run: npm ci
 
-      # Fail fast on TypeScript errors before paying for Rust setup (~2 min)
-      # and the long Tauri build. `tsc --noEmit` runs in <30s.
-      - name: Frontend type check
-        run: npm run typecheck
-
-      - name: Set up Rust (stable)
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
 
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Build Tauri app – Windows
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: code signing (configure in repo secrets)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Naukri Lelo ${{ github.ref_name }}"
           releaseBody: |
-            ## Naukri Lelo ${{ github.ref_name }}
-
-            Free, open-source AI interview assistant. Invisible during screen sharing.
-            BYOK — bring your own API key (OpenRouter free tier works out of the box).
-
-            ### Installation
-            - **Windows**: Download `Naukri.Lelo_*_x64-setup.exe` and run it.
-
-            ### Getting Started
-            1. Open the app
-            2. Go to **Dev Space** → enter your free [OpenRouter](https://openrouter.ai/keys) key
-            3. For voice transcription, enter your free [Groq](https://console.groq.com/keys) key
-            4. Press `Ctrl+\` to toggle the overlay
-
-            > Linux and macOS builds coming soon.
-          releaseDraft: true
+            See [CHANGELOG.md](https://github.com/Life2death/naukri-lelo-v2/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
+          releaseDraft: false
           prerelease: false
-          args: --target x86_64-pc-windows-msvc
-
-  # ── Linux build ─────────────────────────────────── (coming soon) ────────────
-  # Re-enable when Linux support is ready.
-  # build-linux: (disabled)
-
-  # ── macOS build ──────────────────────────────────── (coming soon) ───────────
-  # Re-enable when macOS support is ready.
-  # build-macos: (disabled)

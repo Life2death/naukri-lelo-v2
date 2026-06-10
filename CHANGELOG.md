@@ -95,6 +95,23 @@ src/
 
 ## Release history
 
+### v6.1.0 (June 10 2026)
+
+- ✨ **New: Floating-bar mode & inline brain selectors.**
+  `BrainSelector` lets you switch AI provider + model inline in the overlay via
+  Popover — no need to dive into Dev Space mid-interview. `SystemPromptSelector`
+  lets you choose the system prompt mode from the same floating bar.
+- 🔐 **Per-provider key persistence.** API keys and model selections are now
+  saved per-provider and restored automatically when you switch back (fixes a
+  bug where switching providers previously wiped your key).
+- 🧩 **Extracted `useOpenRouterModels` hook.** Free-model fetching from
+  OpenRouter's API is now reusable; also used in `Providers.tsx`.
+- 📋 **`PROVIDER_MODEL_SUGGESTIONS` config.** Per-provider default model lists
+  for Groq, OpenAI, Claude, Gemini, Grok, Mistral, Cohere, Perplexity, and
+  Ollama.
+- 🔄 **Cross-window sync.** `PROVIDER_VARIABLES` key added to the storage
+  event listener so changes propagate across windows.
+
 ### v6.0.0 (June 10 2026)
 
 - 🐛 **Fix: app failed to launch on existing installs (startup panic).**
