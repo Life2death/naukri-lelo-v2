@@ -45,9 +45,10 @@ export const BrainSelector = () => {
   };
 
   const handleModelChange = (model: string) => {
+    const savedVars = providerVariables[selectedAIProvider.provider] ?? {};
     onSetSelectedAIProvider({
       provider: selectedAIProvider.provider,
-      variables: { ...selectedAIProvider.variables, model },
+      variables: { ...savedVars, ...selectedAIProvider.variables, model },
     });
   };
 

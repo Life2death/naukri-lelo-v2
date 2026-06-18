@@ -638,11 +638,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       variables: resolvedVars,
     }));
 
-    // Persist explicit variables to provider map
+    // Persist explicit variables to provider map — merge so existing keys
+    // (e.g. api_key) are not wiped when only the model changes.
     if (hasExplicitVars && provider) {
       setProviderVariables((prev) => ({
         ...prev,
-        [provider]: variables,
+        [provider]: { ...(prev[provider] ?? {}), ...variables },
       }));
     }
   };
