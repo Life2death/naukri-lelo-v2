@@ -51,7 +51,7 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<string, string[]> = {
     "deepseek-r1-distill-llama-70b",
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-  claude: ["claude-sonnet-4-20250514", "claude-haiku-3-5-20241022"],
+  claude: ["claude-sonnet-4-5", "claude-opus-4-8", "claude-haiku-4-5-20251001"],
   gemini: ["gemini-2.0-flash", "gemini-2.0-flash-lite"],
   grok: ["grok-2-1212"],
   mistral: ["mistral-large-latest", "mistral-small-latest"],
