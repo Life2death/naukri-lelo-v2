@@ -559,22 +559,26 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     checkImageSupport();
   }, [naukriLeloApiEnabled, selectedAIProvider.provider]);
 
-  // Sync selected AI to localStorage
+  // Sync selected AI to localStorage. Guard against redundant writes: writing
+  // an identical value can bounce a "storage" event back from the other window
+  // and trigger a loadData() that clobbers what the user is mid-edit.
   useEffect(() => {
     if (selectedAIProvider.provider) {
-      safeLocalStorage.setItem(
-        STORAGE_KEYS.SELECTED_AI_PROVIDER,
-        JSON.stringify(selectedAIProvider)
-      );
+      const next = JSON.stringify(selectedAIProvider);
+      if (
+        safeLocalStorage.getItem(STORAGE_KEYS.SELECTED_AI_PROVIDER) !== next
+      ) {
+        safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_AI_PROVIDER, next);
+      }
     }
   }, [selectedAIProvider]);
 
-  // Sync provider variables map to localStorage
+  // Sync provider variables map to localStorage (same redundant-write guard)
   useEffect(() => {
-    safeLocalStorage.setItem(
-      STORAGE_KEYS.PROVIDER_VARIABLES,
-      JSON.stringify(providerVariables)
-    );
+    const next = JSON.stringify(providerVariables);
+    if (safeLocalStorage.getItem(STORAGE_KEYS.PROVIDER_VARIABLES) !== next) {
+      safeLocalStorage.setItem(STORAGE_KEYS.PROVIDER_VARIABLES, next);
+    }
   }, [providerVariables]);
 
   // Sync selected STT to localStorage
