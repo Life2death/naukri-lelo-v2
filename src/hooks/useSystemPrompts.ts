@@ -139,6 +139,21 @@ export const useSystemPrompts = () => {
       const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
       if (selectedPrompt) {
         setSystemPrompt(selectedPrompt.prompt);
+        // Keep localStorage in step with edits to the active prompt.
+        // The overlay window reads SYSTEM_PROMPT from localStorage on startup
+        // and syncs live via the "storage" event, so an edit that only updates
+        // the DB + in-memory state would never reach the overlay (or survive a
+        // restart). Persist here too. Guard against redundant writes since the
+        // storage event fires in the *other* window on every setItem.
+        const storedPrompt = safeLocalStorage.getItem(
+          STORAGE_KEYS.SYSTEM_PROMPT
+        );
+        if (storedPrompt !== selectedPrompt.prompt) {
+          safeLocalStorage.setItem(
+            STORAGE_KEYS.SYSTEM_PROMPT,
+            selectedPrompt.prompt
+          );
+        }
       } else {
         // Selected prompt was deleted, reset to default
         setSelectedPromptId(null);
