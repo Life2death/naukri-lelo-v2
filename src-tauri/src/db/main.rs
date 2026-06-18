@@ -38,5 +38,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("migrations/interview-profiles-v3.sql"),
             kind: MigrationKind::Up,
         },
+        // Migration 6: Add brief_text to interview_profiles
+        Migration {
+            version: 6,
+            description: "add_brief_text_to_profiles",
+            sql: include_str!("migrations/interview-profiles-v4.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }

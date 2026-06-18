@@ -115,3 +115,24 @@ export async function loadProfileRefConvTexts(profileId: string): Promise<string
   }
   return texts;
 }
+
+/**
+ * Builds a compact profile context from the stored AI-generated brief.
+ * Falls back to the full knowledge context if briefText is empty.
+ */
+export function buildProfileBriefContext(
+  profile: InterviewProfile,
+  refConvTexts?: string[]
+): string {
+  if (!profile.briefText.trim()) {
+    return buildProfileKnowledgeContext(profile, refConvTexts);
+  }
+  return [
+    `## Active Interview Profile: ${profile.name}`,
+    "Use the following brief summary as context when answering interview-related questions.",
+    "",
+    profile.briefText.trim(),
+    "",
+    "---",
+  ].join("\n");
+}

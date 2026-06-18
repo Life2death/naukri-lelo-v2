@@ -14,8 +14,8 @@ export const DEFAULT_PROFILE_CONTEXT_SETTINGS: ProfileContextSettings = {
   maxResumeChars: 3000,
   maxGoalsChars: 2000,
   maxDocChars: 800,
-  maxRefConvChars: 1500,
-  maxRefConvs: 3,
+  maxRefConvChars: 800,
+  maxRefConvs: 1,
 };
 
 export const getProfileContextSettings = (): ProfileContextSettings => {

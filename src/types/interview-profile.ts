@@ -10,6 +10,7 @@ export interface InterviewProfile {
   resumeFileName: string;
   goals: string;
   documents: InterviewProfileDocument[];
+  briefText: string;
   createdAt: number;
   updatedAt: number;
 }

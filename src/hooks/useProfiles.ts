@@ -52,6 +52,7 @@ export function useProfiles() {
         resumeFileName: fields.resumeFileName,
         goals: fields.goals,
         documents: fields.documents,
+        briefText: "",
         createdAt: now,
         updatedAt: now,
       };

@@ -8,6 +8,7 @@ interface DbInterviewProfile {
   resume_file_name: string;
   goals: string;
   documents_json: string;
+  brief_text: string;
   created_at: number;
   updated_at: number;
 }
@@ -27,6 +28,7 @@ function toProfile(row: DbInterviewProfile): InterviewProfile {
     resumeFileName: row.resume_file_name || "",
     goals: row.goals,
     documents,
+    briefText: row.brief_text || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -53,8 +55,8 @@ export async function createProfile(profile: InterviewProfile): Promise<Intervie
   const db = await getDatabase();
   const documentsJson = JSON.stringify(profile.documents || []);
   await db.execute(
-    "INSERT INTO interview_profiles (id, name, resume_text, resume_file_name, goals, documents_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    [profile.id, profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.createdAt, profile.updatedAt]
+    "INSERT INTO interview_profiles (id, name, resume_text, resume_file_name, goals, documents_json, brief_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [profile.id, profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.briefText || "", profile.createdAt, profile.updatedAt]
   );
   return profile;
 }
@@ -63,8 +65,8 @@ export async function updateProfile(profile: InterviewProfile): Promise<Intervie
   const db = await getDatabase();
   const documentsJson = JSON.stringify(profile.documents || []);
   await db.execute(
-    "UPDATE interview_profiles SET name = ?, resume_text = ?, resume_file_name = ?, goals = ?, documents_json = ?, updated_at = ? WHERE id = ?",
-    [profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.updatedAt, profile.id]
+    "UPDATE interview_profiles SET name = ?, resume_text = ?, resume_file_name = ?, goals = ?, documents_json = ?, brief_text = ?, updated_at = ? WHERE id = ?",
+    [profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.briefText || "", profile.updatedAt, profile.id]
   );
   return profile;
 }

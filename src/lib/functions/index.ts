@@ -4,4 +4,5 @@ export * from "./common.function";
 export * from "./naukri-lelo.api";
 export * from "./file-extract";
 export * from "./profile-context";
+export * from "./profile-brief";
 export * from "./job-search.function";

@@ -12,6 +12,7 @@ import {
   Input,
 } from "@/components";
 import { useProfiles } from "@/hooks";
+import { useApp } from "@/contexts";
 import {
   BriefcaseIcon,
   DownloadIcon,
@@ -28,7 +29,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import moment from "moment";
 import { ProfileFormData, ProfileFormDialog } from "./ProfileFormDialog";
-import { getConversationById, getProfileRefConvIds } from "@/lib";
+import {
+  getConversationById,
+  getProfileRefConvIds,
+  generateProfileBrief,
+  updateProfile,
+} from "@/lib";
 import { InterviewProfile } from "@/types";
 
 const EMPTY_FORM: ProfileFormData = {
@@ -42,6 +48,7 @@ const EMPTY_FORM: ProfileFormData = {
 const Profiles = () => {
   const { profiles, isLoading, addProfile, editProfile, removeProfile } =
     useProfiles();
+  const { selectedAIProvider, allAiProviders } = useApp();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
@@ -122,6 +129,8 @@ const Profiles = () => {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      let savedProfile: InterviewProfile | undefined;
+
       if (form.id) {
         await editProfile(form.id, {
           name: form.name,
@@ -130,8 +139,19 @@ const Profiles = () => {
           goals: form.goals,
           documents: form.documents,
         });
+        savedProfile = {
+          id: form.id,
+          name: form.name,
+          resumeText: form.resumeText,
+          resumeFileName: form.resumeFileName,
+          goals: form.goals,
+          documents: form.documents,
+          briefText: "",
+          createdAt: 0,
+          updatedAt: Date.now(),
+        };
       } else {
-        await addProfile({
+        savedProfile = await addProfile({
           name: form.name,
           resumeText: form.resumeText,
           resumeFileName: form.resumeFileName,
@@ -139,6 +159,25 @@ const Profiles = () => {
           documents: form.documents,
         });
       }
+
+      // Auto-generate brief in background (never blocks save)
+      if (savedProfile && selectedAIProvider.provider) {
+        const provider = allAiProviders.find(
+          (p) => p.id === selectedAIProvider.provider
+        );
+        if (provider) {
+          generateProfileBrief({
+            profile: savedProfile,
+            provider,
+            selectedProvider: selectedAIProvider,
+          }).then((brief) => {
+            if (brief) {
+              updateProfile({ ...savedProfile!, briefText: brief, updatedAt: Date.now() });
+            }
+          });
+        }
+      }
+
       setIsDialogOpen(false);
       setForm(EMPTY_FORM);
     } catch (err) {

@@ -31,6 +31,7 @@ const profileA: InterviewProfile = {
   resumeFileName: "resume.pdf",
   goals: "FAANG senior role",
   documents: [],
+  briefText: "",
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -42,6 +43,7 @@ const profileB: InterviewProfile = {
   resumeFileName: "",
   goals: "Backend role at startup",
   documents: [{ name: "cert.pdf", text: "Certification text" }],
+  briefText: "",
   createdAt: NOW,
   updatedAt: NOW,
 };

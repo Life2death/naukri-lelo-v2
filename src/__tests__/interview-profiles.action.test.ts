@@ -32,6 +32,7 @@ const dbRow = {
   resume_file_name: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
   documents_json: '[{"name":"cover.pdf","text":"Cover letter text"}]',
+  brief_text: "",
   created_at: NOW,
   updated_at: NOW,
 };
@@ -43,6 +44,7 @@ const expectedProfile: InterviewProfile = {
   resumeFileName: "resume.pdf",
   goals: "Land a senior role at a FAANG company",
   documents: [{ name: "cover.pdf", text: "Cover letter text" }],
+  briefText: "",
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -125,6 +127,7 @@ describe("interview-profiles.action", () => {
           expectedProfile.resumeFileName,
           expectedProfile.goals,
           JSON.stringify(expectedProfile.documents),
+          expectedProfile.briefText,
           expectedProfile.createdAt,
           expectedProfile.updatedAt,
         ]
@@ -152,6 +155,7 @@ describe("interview-profiles.action", () => {
           updated.resumeFileName,
           updated.goals,
           JSON.stringify(updated.documents),
+          updated.briefText,
           updated.updatedAt,
           updated.id,
         ]

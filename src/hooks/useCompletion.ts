@@ -15,6 +15,7 @@ import {
   getResponseSettings,
   getProfileById,
   buildProfileKnowledgeContext,
+  buildProfileBriefContext,
   loadProfileRefConvTexts,
 } from "@/lib";
 import { InterviewProfile } from "@/types";
@@ -69,6 +70,7 @@ export const useCompletion = () => {
   // Cache loaded profile and its ref-conv texts so we don't re-fetch every keystroke
   const activeProfileRef = useRef<InterviewProfile | null>(null);
   const profileContextRef = useRef<string>("");
+  const profileBriefRef = useRef<string>("");
 
   const [state, setState] = useState<CompletionState>({
     input: "",
@@ -93,10 +95,12 @@ export const useCompletion = () => {
 
   const { resizeWindow } = useWindowResize();
 
-  /** Builds the effective system prompt, prepending profile knowledge context when a profile is active */
-  const buildEffectiveSystemPrompt = useCallback((): string | undefined => {
+  /** Builds the effective system prompt, prepending profile knowledge context when a profile is active.
+   *  When useFullContext is true, sends the full resume/JD/docs (used by prompt caching).
+   *  Default (false) sends the compact AI-generated brief. Falls back to full context if brief is empty. */
+  const buildEffectiveSystemPrompt = useCallback((useFullContext = false): string | undefined => {
     const base = systemPrompt || undefined;
-    const profileCtx = profileContextRef.current;
+    const profileCtx = useFullContext ? profileContextRef.current : (profileBriefRef.current || profileContextRef.current);
     if (!profileCtx) return base;
     return base ? `${profileCtx}\n\n---\n\n${base}` : profileCtx;
   }, [systemPrompt]);
@@ -110,6 +114,7 @@ export const useCompletion = () => {
     if (!activeProfileId) {
       activeProfileRef.current = null;
       profileContextRef.current = "";
+      profileBriefRef.current = "";
       return;
     }
     let cancelled = false;
@@ -121,9 +126,11 @@ export const useCompletion = () => {
         const refTexts = await loadProfileRefConvTexts(activeProfileId);
         if (cancelled) return;
         profileContextRef.current = buildProfileKnowledgeContext(profile, refTexts);
+        profileBriefRef.current = buildProfileBriefContext(profile, refTexts);
       } catch {
         activeProfileRef.current = null;
         profileContextRef.current = "";
+        profileBriefRef.current = "";
       }
     })();
     return () => { cancelled = true; };
@@ -201,11 +208,14 @@ export const useCompletion = () => {
       const signal = abortControllerRef.current.signal;
 
       try {
-        // Prepare message history for the AI
-        const messageHistory = state.conversationHistory.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+        // Prepare message history for the AI (cap to last 6 messages for context efficiency)
+        const MAX_HISTORY_MESSAGES = 6;
+        const messageHistory = state.conversationHistory
+          .map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          }))
+          .slice(-MAX_HISTORY_MESSAGES);
 
         // Handle image attachments
         const imagesBase64: string[] = [];
@@ -248,11 +258,13 @@ export const useCompletion = () => {
         }));
 
         try {
+          // TODO: wire full-context toggle from settings — default false (brief mode)
+          const FULL_CONTEXT_MODE = false;
           // Use the fetchAIResponse function with signal
           for await (const chunk of fetchAIResponse({
             provider: provider,
             selectedProvider: selectedAIProvider,
-            systemPrompt: buildEffectiveSystemPrompt(),
+            systemPrompt: buildEffectiveSystemPrompt(FULL_CONTEXT_MODE),
             history: messageHistory,
             userMessage: input,
             imagesBase64,
@@ -614,11 +626,14 @@ export const useCompletion = () => {
           const signal = abortControllerRef.current.signal;
 
           try {
-            // Prepare message history for the AI
-            const messageHistory = state.conversationHistory.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-            }));
+            // Prepare message history for the AI (cap to last 6 messages)
+            const MAX_HISTORY_MESSAGES = 6;
+            const messageHistory = state.conversationHistory
+              .map((msg) => ({
+                role: msg.role,
+                content: msg.content,
+              }))
+              .slice(-MAX_HISTORY_MESSAGES);
 
             let fullResponse = "";
 
@@ -651,11 +666,13 @@ export const useCompletion = () => {
               response: "",
             }));
 
+            // TODO: wire full-context toggle from settings — default false (brief mode)
+            const FULL_CONTEXT_MODE = false;
             // Use the fetchAIResponse function with image and signal
             for await (const chunk of fetchAIResponse({
               provider: provider,
               selectedProvider: selectedAIProvider,
-              systemPrompt: buildEffectiveSystemPrompt(),
+              systemPrompt: buildEffectiveSystemPrompt(FULL_CONTEXT_MODE),
               history: messageHistory,
               userMessage: prompt,
               imagesBase64: [base64],
