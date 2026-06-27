@@ -305,6 +305,41 @@ The overlay and the Responses page are **separate webviews** sharing the same `l
 1. **Global default length = `short`.** Set `DEFAULT_RESPONSE_LENGTH = "short"` ([response-settings.constants.ts:218](src/lib/response-settings.constants.ts)) so unset installs are fast-by-default. (This is the single global default, applied everywhere — overlay, chat, audio — since per-surface defaulting is removed in E1.)
 2. **Overlay control = Response Length only** (Short / Medium / Auto). Language and Auto-scroll stay on the Responses page only. Build `ResponseQuickSettings` with just the length switch.
 
+## Phase F — Regenerate the same question at a chosen length (bidirectional)
+
+**Intent:** after an answer is shown, the user can re-answer the **same question** at a different length — longer *or* shorter — in one tap, without retyping. One-off: it must **not** change the global default length. Streams in, **replaces** the current answer in place (no stacking of versions).
+
+### F1. Add a "Long" tier + fix the order
+[src/lib/response-settings.constants.ts](src/lib/response-settings.constants.ts):
+- Add a 4th `RESPONSE_LENGTHS` entry `{ id: "long", title: "Long", ... }` with a comprehensive-answer prompt, e.g.: *"IMPORTANT: Provide a thorough, comprehensive answer. Use multiple well-structured paragraphs with depth, concrete examples, and reasoning. Be complete without padding or repetition."*
+- Reorder the array to **Auto, Short, Medium, Long** (this order flows to the regenerate menu, the header `Short ▾` toggle, and the Responses settings page — all read `RESPONSE_LENGTHS`).
+- `DEFAULT_RESPONSE_LENGTH` stays `"short"` (selected by id, not array position).
+
+### F2. Per-request length override (the clean mechanism)
+- Thread an optional `responseLengthOverride?: string` param: `regenerate → fetchAIResponse params → buildEnhancedSystemPrompt`. When present it **wins over** `getResponseSettings().responseLength`; when absent, behavior is unchanged.
+- The global setting and the header toggle are untouched by a regenerate.
+
+### F3. Stash the last question so regenerate can reuse it
+- In `useCompletion`, on each submit/screenshot-submit, store `lastUserMessageRef` and `lastImagesRef` (history holds the text but **not** the image base64 — a regenerate of a screenshot question must re-send the image).
+- Add `regenerate(lengthId: string)`:
+  - guard: no-op if there's no last question;
+  - abort any in-flight request (reuse the existing `abortControllerRef` + `requestId` pattern);
+  - re-run `fetchAIResponse` with the last message + last images + `responseLengthOverride: lengthId`, streaming into `state.response` (replace, not append);
+  - **don't add a new turn** — update/replace the **last assistant message** in the saved conversation rather than appending a duplicate user+assistant pair (avoid polluting history/ref-convs with N answers to one question).
+
+### F4. UI — `↻` regenerate control in the response panel
+- New control in the AI Response panel header (next to the existing `Short ▾` toggle / Copy / Close in [Input.tsx](src/pages/app/components/completion/Input.tsx)): a `↻` button opening a menu titled **"Regenerate at length"** with the four tiers in order **Auto · Short · Medium · Long**. Picking one calls `regenerate(id)`.
+- Keep it visually distinct from the `Short ▾` default-setter so the two don't blur: clear tooltips — `Short ▾` → *"Default length for new questions"*, `↻` → *"Regenerate this answer at…"*. (Same Radix nested-popover-in-PopoverContent pattern that now works for `ResponseQuickSettings` — not in a nested trigger.)
+- Disable/hide the regenerate control while `isLoading` and when there's no answer yet.
+
+### F5. Tests & acceptance
+- **Unit:** `buildEnhancedSystemPrompt(base, segments, undefined, "long")` (or however the override is passed) uses the `long` prompt regardless of the stored setting; with no override it uses the stored setting. `text` stays byte-stable for a given (setting, override).
+- **Unit:** `RESPONSE_LENGTHS` has 4 tiers in order auto, short, medium, long.
+- **Manual:** ask a question (Short) → open `↻` → pick **Long** → a longer answer streams in, replacing the short one; the header `Short ▾` is **still Short** (default unchanged). Then `↻` → **Short** → it tightens again. Regenerating a **screenshot** question re-uses the image. The conversation in history shows **one** answer for that question, not several.
+
+### Decision (answered 2026-06-27)
+- Regenerate menu = full tier set **Auto, Short, Medium, Long** (jump straight to any length, both directions) — not relative Shorter/Longer steps. Replace-in-place (not append).
+
 ## Definition of done (whole feature)
 - [ ] Inspector shows per-segment breakdown + real `usage` (incl. cache tokens) for overlay, chat, and audio paths
 - [ ] Overlay defaults to short output; explicit setting still wins
