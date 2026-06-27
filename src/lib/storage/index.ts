@@ -8,3 +8,4 @@ export * from "./job-providers";
 export * from "./job-history";
 export * from "./job-search-skills";
 export * from "./profile-context.storage";
+export * from "./failover.storage";

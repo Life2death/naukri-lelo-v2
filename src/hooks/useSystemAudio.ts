@@ -3,7 +3,8 @@ import { useWindowResize, useGlobalShortcuts } from ".";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useApp } from "@/contexts";
-import { fetchSTT, fetchAIResponse } from "@/lib/functions";
+import { fetchSTT, fetchAIResponseWithFailover } from "@/lib/functions";
+import { getFailoverEnabled, getFailoverChain } from "@/lib/storage";
 import {
   DEFAULT_QUICK_ACTIONS,
   DEFAULT_SYSTEM_PROMPT,
@@ -499,9 +500,16 @@ export function useSystemAudio() {
         }
 
         try {
-          for await (const chunk of fetchAIResponse({
+          const failoverEnabled = getFailoverEnabled();
+          const failoverChain = failoverEnabled
+            ? [provider, ...getFailoverChain()
+                .map((id) => allAiProviders.find((p) => p.id === id))
+                .filter((p): p is NonNullable<typeof p> => p != null && p.id !== selectedAIProvider.provider)]
+            : undefined;
+          for await (const chunk of fetchAIResponseWithFailover({
             provider: provider,
             selectedProvider: selectedAIProvider,
+            failoverChain: failoverChain,
             systemPrompt: prompt,
             history: previousMessages,
             userMessage: transcription,

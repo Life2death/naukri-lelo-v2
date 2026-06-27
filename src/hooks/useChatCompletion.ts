@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "@/contexts";
 import { MAX_FILES } from "@/config";
 import {
-  fetchAIResponse,
+  fetchAIResponseWithFailover,
+  getFailoverEnabled,
+  getFailoverChain,
   saveConversation,
   getConversationById,
   generateConversationTitle,
@@ -222,10 +224,18 @@ export const useChatCompletion = (
         let fullResponse = "";
 
         try {
-          // Use the fetchAIResponse function with signal
-          for await (const chunk of fetchAIResponse({
+          // Build failover chain: primary first, then any configured fallback providers
+          const failoverEnabled = getFailoverEnabled();
+          const failoverChain = failoverEnabled
+            ? [provider, ...getFailoverChain()
+                .map((id) => allAiProviders.find((p) => p.id === id))
+                .filter((p): p is NonNullable<typeof p> => p != null && p.id !== selectedAIProvider.provider)]
+            : undefined;
+          // Use the fetchAIResponse function with signal (with optional failover)
+          for await (const chunk of fetchAIResponseWithFailover({
             provider: provider,
             selectedProvider: selectedAIProvider,
+            failoverChain: failoverChain,
             systemPrompt: systemPrompt || undefined,
             history: messageHistory,
             userMessage: input,

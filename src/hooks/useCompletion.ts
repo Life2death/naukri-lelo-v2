@@ -4,7 +4,9 @@ import { useGlobalShortcuts } from "@/hooks";
 import { MAX_FILES } from "@/config";
 import { useApp } from "@/contexts";
 import {
-  fetchAIResponse,
+  fetchAIResponseWithFailover,
+  getFailoverEnabled,
+  getFailoverChain,
   saveConversation,
   getConversationById,
   generateConversationTitle,
@@ -274,10 +276,18 @@ export const useCompletion = () => {
           // For Anthropic-with-caching, default to full context mode (the brief is below the cache floor)
           const FULL_CONTEXT_MODE = selectedAIProvider.provider === "claude";
           const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
-          // Use the fetchAIResponse function with signal
-          for await (const chunk of fetchAIResponse({
+          // Build failover chain: primary first, then any configured fallback providers
+          const failoverEnabled = getFailoverEnabled();
+          const failoverChain = failoverEnabled
+            ? [provider, ...getFailoverChain()
+                .map((id) => allAiProviders.find((p) => p.id === id))
+                .filter((p): p is NonNullable<typeof p> => p != null && p.id !== selectedAIProvider.provider)]
+            : undefined;
+          // Use the fetchAIResponse function with signal (with optional failover)
+          for await (const chunk of fetchAIResponseWithFailover({
             provider: provider,
             selectedProvider: selectedAIProvider,
+            failoverChain: failoverChain,
             systemPrompt: effectivePrompt?.text,
             segments: effectivePrompt?.segments,
             history: messageHistory,
@@ -685,10 +695,18 @@ export const useCompletion = () => {
             // For Anthropic-with-caching, default to full context mode (the brief is below the cache floor)
             const FULL_CONTEXT_MODE = selectedAIProvider.provider === "claude";
             const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
-            // Use the fetchAIResponse function with image and signal
-            for await (const chunk of fetchAIResponse({
+            // Build failover chain: primary first, then any configured fallback providers
+            const failoverEnabled = getFailoverEnabled();
+            const failoverChain = failoverEnabled
+              ? [provider, ...getFailoverChain()
+                  .map((id) => allAiProviders.find((p) => p.id === id))
+                  .filter((p): p is NonNullable<typeof p> => p != null && p.id !== selectedAIProvider.provider)]
+              : undefined;
+            // Use the fetchAIResponse function with image and signal (with optional failover)
+            for await (const chunk of fetchAIResponseWithFailover({
               provider: provider,
               selectedProvider: selectedAIProvider,
+              failoverChain: failoverChain,
               systemPrompt: effectivePrompt?.text,
               segments: effectivePrompt?.segments,
               history: messageHistory,
