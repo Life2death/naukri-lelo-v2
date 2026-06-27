@@ -47,3 +47,41 @@ describe("safeLocalStorage", () => {
     expect(safeLocalStorage.getItem("overwrite")).toBe("second");
   });
 });
+
+// ── getResponseSettings per-surface defaults (Part D1) ─────────────────────
+
+import { getResponseSettings, setResponseSettings } from "@/lib/storage/response-settings.storage";
+
+describe("getResponseSettings per-surface default (D1)", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+  });
+
+  it('returns "short" for overlay when unset', () => {
+    const settings = getResponseSettings("overlay");
+    expect(settings.responseLength).toBe("short");
+  });
+
+  it('returns "auto" for chat when unset', () => {
+    const settings = getResponseSettings("chat");
+    expect(settings.responseLength).toBe("auto");
+  });
+
+  it("stored value overrides overlay default", () => {
+    setResponseSettings({ responseLength: "medium", language: "english", autoScroll: true });
+    const settings = getResponseSettings("overlay");
+    expect(settings.responseLength).toBe("medium");
+  });
+
+  it("stored value overrides chat default", () => {
+    setResponseSettings({ responseLength: "short", language: "english", autoScroll: true });
+    const settings = getResponseSettings("chat");
+    expect(settings.responseLength).toBe("short");
+  });
+
+  it("returns generic defaults when called without source", () => {
+    const settings = getResponseSettings();
+    expect(settings.responseLength).toBe("auto");
+  });
+});

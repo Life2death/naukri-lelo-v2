@@ -18,21 +18,25 @@ export const DEFAULT_RESPONSE_SETTINGS: ResponseSettings = {
 };
 
 /**
- * Get response settings from localStorage
+ * Get response settings from localStorage.
+ * When `source` is provided and no explicit value is stored, use a per-surface default:
+ * - "overlay" → responseLength defaults to "short"
+ * - "chat"    → responseLength defaults to "auto"
  */
-export const getResponseSettings = (): ResponseSettings => {
+export const getResponseSettings = (
+  source?: "overlay" | "chat" | "audio"
+): ResponseSettings => {
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.RESPONSE_SETTINGS);
     if (!stored) {
-      return DEFAULT_RESPONSE_SETTINGS;
+      return getDefaultForSource(source);
     }
 
     const parsedSettings = JSON.parse(stored);
 
     return {
       responseLength:
-        parsedSettings.responseLength ||
-        DEFAULT_RESPONSE_SETTINGS.responseLength,
+        parsedSettings.responseLength || getDefaultForSource(source).responseLength,
       language: parsedSettings.language || DEFAULT_RESPONSE_SETTINGS.language,
       autoScroll:
         parsedSettings.autoScroll !== undefined
@@ -41,9 +45,17 @@ export const getResponseSettings = (): ResponseSettings => {
     };
   } catch (error) {
     console.error("Failed to get response settings:", error);
-    return DEFAULT_RESPONSE_SETTINGS;
+    return getDefaultForSource(source);
   }
 };
+
+/** Returns a ResponseSettings with per-source defaults */
+function getDefaultForSource(source?: "overlay" | "chat" | "audio"): ResponseSettings {
+  if (source === "overlay") {
+    return { responseLength: "short", language: DEFAULT_LANGUAGE, autoScroll: DEFAULT_AUTO_SCROLL };
+  }
+  return DEFAULT_RESPONSE_SETTINGS;
+}
 
 /**
  * Save response settings to localStorage
