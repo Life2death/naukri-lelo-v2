@@ -33,7 +33,10 @@ vi.mock("@/lib", async (importOriginal) => {
   return {
     ...orig,
     getResponseSettings: () => ({ responseLength: "medium", language: "en" }),
-    RESPONSE_LENGTHS: [{ id: "medium", prompt: "" }],
+    RESPONSE_LENGTHS: [
+      { id: "auto", title: "Auto", description: "", prompt: "Auto prompt." },
+      { id: "medium", title: "Medium", description: "", prompt: "Medium prompt." },
+    ],
     LANGUAGES: [{ id: "en", prompt: "" }],
   };
 });
@@ -347,12 +350,26 @@ describe("buildEnhancedSystemPrompt", () => {
 
   it("text is byte-identical to the old string output for same inputs", () => {
     // The authoritative text is: baseSystemPrompt + lengthRule + language + markdown
-    // With the mock data (lengthRule.prompt="", language.prompt="", MARKDOWN=""),
-    // the text equals baseSystemPrompt when present, or "" when not
+    // With mock data: lengthRule="Medium prompt.", language omitted (en), MARKDOWN=""
     const withBase = buildEnhancedSystemPrompt("Hello");
-    expect(withBase.text).toBe("Hello ");
+    expect(withBase.text).toBe("Hello Medium prompt. ");
 
     const withoutBase = buildEnhancedSystemPrompt();
-    expect(withoutBase.text).toBe("");
+    expect(withoutBase.text).toBe("Medium prompt. ");
+  });
+
+  it("responseLengthOverride beats getResponseSettings (Phase F)", () => {
+    // Mock returns medium; override auto should switch to auto's (empty) prompt
+    const result = buildEnhancedSystemPrompt("Base", undefined, "auto");
+    expect(result.text).toContain("Base");
+    // lengthRule segment should use "auto"
+    const lengthSeg = result.segments.find((s) => s.name === "lengthRule");
+    expect(lengthSeg).toBeDefined();
+  });
+
+  it("no override uses stored setting (Phase F)", () => {
+    const result = buildEnhancedSystemPrompt("Base");
+    const lengthSeg = result.segments.find((s) => s.name === "lengthRule");
+    expect(lengthSeg).toBeDefined();
   });
 });

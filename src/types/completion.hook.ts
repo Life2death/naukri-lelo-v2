@@ -79,6 +79,8 @@ export interface UseCompletionReturn {
   /** Function to start a new conversation (clears current state) */
   startNewConversation: () => void;
 
+  /** Regenerate the last question at a given response length. Replaces the current answer in-place. */
+  regenerate?: (lengthId: string) => Promise<void>;
   // UI state management
   /** Whether the message history modal/panel is open */
   messageHistoryOpen: boolean;

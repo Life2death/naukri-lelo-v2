@@ -22,7 +22,8 @@ export interface PromptSegment {
 
 export function buildEnhancedSystemPrompt(
   baseSystemPrompt?: string,
-  incomingSegments?: PromptSegment[]
+  incomingSegments?: PromptSegment[],
+  responseLengthOverride?: string
 ): { text: string; segments: PromptSegment[] } {
   const responseSettings = getResponseSettings();
   const prompts: string[] = [];
@@ -31,8 +32,9 @@ export function buildEnhancedSystemPrompt(
     prompts.push(baseSystemPrompt);
   }
 
+  const effectiveLength = responseLengthOverride || responseSettings.responseLength;
   const lengthOption = RESPONSE_LENGTHS.find(
-    (l) => l.id === responseSettings.responseLength
+    (l) => l.id === effectiveLength
   );
   if (lengthOption?.prompt?.trim()) {
     prompts.push(lengthOption.prompt);
@@ -80,6 +82,8 @@ export interface FetchAIResponseParams {
   signal?: AbortSignal;
   /** Used for prompt-capture source attribution. Only meaningful when DEBUG_CAPTURE is enabled. */
   _source?: PromptCaptureSource;
+  /** Per-request length override. When present, wins over getResponseSettings().responseLength. Absent = unchanged. */
+  responseLengthOverride?: string;
 }
 
 export async function* fetchAIResponse(
@@ -95,6 +99,7 @@ export async function* fetchAIResponse(
       userMessage,
       imagesBase64 = [],
       signal,
+      responseLengthOverride,
     } = params;
 
     // Check if already aborted
@@ -103,7 +108,7 @@ export async function* fetchAIResponse(
     }
 
     const { text: enhancedSystemPrompt, segments: promptSegments } =
-      buildEnhancedSystemPrompt(systemPrompt, incomingSegments);
+      buildEnhancedSystemPrompt(systemPrompt, incomingSegments, responseLengthOverride);
 
     if (!provider) {
       throw new Error(`Provider not provided`);

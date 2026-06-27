@@ -1,4 +1,4 @@
-import { Loader2, XIcon } from "lucide-react";
+import { Loader2, XIcon, RefreshCw } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -14,6 +14,7 @@ import { UseCompletionReturn } from "@/types";
 import { MessageHistory } from "./MessageHistory";
 import { ProfileContextBanner } from "./ProfileContextBanner";
 import { ResponseQuickSettings } from "./ResponseQuickSettings";
+import { RESPONSE_LENGTHS } from "@/lib";
 
 export const Input = ({
   isPopoverOpen,
@@ -36,6 +37,7 @@ export const Input = ({
   isHidden,
   keepEngaged,
   setKeepEngaged,
+  regenerate,
 }: UseCompletionReturn & { isHidden: boolean }) => {
   return (
     <div className="relative flex-1">
@@ -127,6 +129,42 @@ export const Input = ({
                 />
               </div>
               <ResponseQuickSettings />
+
+              {/* Regenerate at length — Phase F */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled={isLoading || !response}
+                    className="cursor-pointer"
+                    title="Regenerate this answer at a different length"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  side="bottom"
+                  className="w-44 p-1"
+                  sideOffset={4}
+                >
+                  <p className="text-[11px] text-muted-foreground px-2 py-1 select-none">
+                    Regenerate at length
+                  </p>
+                  {RESPONSE_LENGTHS.map((length) => (
+                    <Button
+                      key={length.id}
+                      variant="ghost"
+                      className="w-full justify-start text-xs cursor-pointer"
+                      onClick={() => regenerate?.(length.id)}
+                    >
+                      {length.title}
+                    </Button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
               <CopyButton content={response} />
               <Button
                 size="icon"

@@ -51,6 +51,7 @@ describe("safeLocalStorage", () => {
 // ── getResponseSettings (Phase E — single source of truth) ─────────────────
 
 import { getResponseSettings, setResponseSettings } from "@/lib/storage/response-settings.storage";
+import { RESPONSE_LENGTHS, DEFAULT_RESPONSE_LENGTH } from "@/lib";
 
 describe("getResponseSettings (E1 — single source of truth)", () => {
   beforeEach(() => {
@@ -75,5 +76,25 @@ describe("getResponseSettings (E1 — single source of truth)", () => {
     setResponseSettings({ responseLength: "medium", language: "english", autoScroll: true });
     const settings = getResponseSettings();
     expect(settings.responseLength).toBe("medium");
+  });
+});
+
+// ── Phase F — Respone length tiers + per-request override ────────────────
+
+describe("Phase F — RESPONSE_LENGTHS tiers", () => {
+  it("has 4 tiers in order: auto, short, medium, long", () => {
+    const ids = RESPONSE_LENGTHS.map((l) => l.id);
+    expect(ids).toEqual(["auto", "short", "medium", "long"]);
+  });
+
+  it("includes a 'long' entry with a non-empty prompt", () => {
+    const long = RESPONSE_LENGTHS.find((l) => l.id === "long");
+    expect(long).toBeDefined();
+    expect(long!.prompt.length).toBeGreaterThan(0);
+    expect(long!.description.length).toBeGreaterThan(0);
+  });
+
+  it("DEFAULT_RESPONSE_LENGTH is still 'short'", () => {
+    expect(DEFAULT_RESPONSE_LENGTH).toBe("short");
   });
 });

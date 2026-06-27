@@ -156,6 +156,9 @@ export const useCompletion = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
+  // Stash for regenerate (Phase F)
+  const lastUserMessageRef = useRef<string>("");
+  const lastImagesRef = useRef<string[]>([]);
 
   const setInput = useCallback((value: string) => {
     setState((prev) => ({ ...prev, input: value }));
@@ -349,6 +352,9 @@ export const useCompletion = () => {
             fullResponse,
             state.attachedFiles
           );
+          // Stash last question for regenerate (Phase F)
+          lastUserMessageRef.current = input;
+          lastImagesRef.current = imagesBase64;
           // Clear input and attached files after saving
           setState((prev) => ({
             ...prev,
@@ -386,6 +392,131 @@ export const useCompletion = () => {
     currentRequestIdRef.current = null;
     setState((prev) => ({ ...prev, isLoading: false }));
   }, []);
+
+  const regenerate = useCallback(
+    async (lengthId: string) => {
+      const lastMsg = lastUserMessageRef.current;
+      if (!lastMsg || !state.response) return;
+      if (state.isLoading) return;
+
+      // Abort any in-flight request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+      const requestId = generateRequestId();
+      currentRequestIdRef.current = requestId;
+
+      const provider = allAiProviders.find(
+        (p) => p.id === selectedAIProvider.provider
+      );
+      if (!provider) return;
+
+      const prevResponse = state.response;
+      setState((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+        response: "",
+      }));
+
+      try {
+        const FULL_CONTEXT_MODE = selectedAIProvider.provider === "claude";
+        const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
+        const failoverEnabled = getFailoverEnabled();
+        const failoverChain = failoverEnabled
+          ? [
+              { provider, variables: providerVariables[provider.id || ""] || {} },
+              ...getFailoverChain()
+                .filter((id) => id !== selectedAIProvider.provider)
+                .map((id) => allAiProviders.find((p) => p.id === id))
+                .filter((p): p is NonNullable<typeof p> => p != null)
+                .map((p) => ({ provider: p, variables: providerVariables[p.id || ""] || {} })),
+            ]
+          : undefined;
+
+        let fullResponse = "";
+        for await (const chunk of fetchAIResponseWithFailover({
+          provider,
+          selectedProvider: selectedAIProvider,
+          failoverChain,
+          systemPrompt: effectivePrompt?.text,
+          segments: effectivePrompt?.segments,
+          history: state.conversationHistory
+            .map((msg: any) => ({ role: msg.role, content: msg.content }))
+            .slice(-6),
+          userMessage: lastMsg,
+          imagesBase64: lastImagesRef.current,
+          signal,
+          _source: "overlay",
+          responseLengthOverride: lengthId,
+        })) {
+          if (currentRequestIdRef.current !== requestId || signal.aborted) return;
+          fullResponse += chunk;
+          setState((prev) => ({ ...prev, response: prev.response + chunk }));
+        }
+
+        if (currentRequestIdRef.current !== requestId || signal.aborted) return;
+        setState((prev) => ({ ...prev, isLoading: false }));
+
+        if (fullResponse) {
+          // Update the last assistant message in-place (replace, not append)
+          setState((prev) => {
+            const history = [...prev.conversationHistory];
+            // Find the last assistant message and replace its content
+            for (let i = history.length - 1; i >= 0; i--) {
+              if (history[i].role === "assistant") {
+                history[i] = { ...history[i], content: fullResponse, timestamp: Date.now() };
+                break;
+              }
+            }
+            return { ...prev, conversationHistory: history };
+          });
+          // Persist the updated conversation
+          const conversationId = state.currentConversationId;
+          if (conversationId) {
+            try {
+              const { getConversationById, saveConversation } = await import("@/lib");
+              const existing = await getConversationById(conversationId);
+              if (existing) {
+                const messages = [...existing.messages];
+                for (let i = messages.length - 1; i >= 0; i--) {
+                  if (messages[i].role === "assistant") {
+                    messages[i] = { ...messages[i], content: fullResponse, timestamp: Date.now() };
+                    break;
+                  }
+                }
+                await saveConversation({ ...existing, messages, updatedAt: Date.now() });
+              }
+            } catch {
+              // Non-critical — the in-memory state is already updated
+            }
+          }
+        }
+      } catch (e: any) {
+        if (currentRequestIdRef.current === requestId && !signal.aborted) {
+          // Restore previous response on failure
+          setState((prev) => ({
+            ...prev,
+            isLoading: false,
+            error: e.message || "Regeneration failed",
+            response: prev.response || prevResponse,
+          }));
+        }
+      }
+    },
+    [
+      state.response,
+      state.isLoading,
+      state.currentConversationId,
+      state.conversationHistory,
+      selectedAIProvider,
+      allAiProviders,
+      providerVariables,
+      buildEffectiveSystemPrompt,
+    ]
+  );
 
   const reset = useCallback(() => {
     // Don't reset if keep engaged mode is active
@@ -755,6 +886,9 @@ export const useCompletion = () => {
               await saveCurrentConversation(prompt, fullResponse, [
                 attachedFile,
               ]);
+              // Stash last question for regenerate (Phase F)
+              lastUserMessageRef.current = prompt || "";
+              lastImagesRef.current = [base64];
               // Clear input after saving
               setState((prev) => ({
                 ...prev,
@@ -1151,5 +1285,6 @@ export const useCompletion = () => {
     isScreenshotLoading,
     keepEngaged,
     setKeepEngaged,
+    regenerate,
   };
 };

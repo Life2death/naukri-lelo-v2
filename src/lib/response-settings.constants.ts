@@ -1,5 +1,5 @@
 export interface ResponseLengthOption {
-  id: "short" | "medium" | "auto";
+  id: "auto" | "short" | "medium" | "long";
   title: string;
   description: string;
   prompt: string;
@@ -13,6 +13,14 @@ export interface LanguageOption {
 }
 
 export const RESPONSE_LENGTHS: ResponseLengthOption[] = [
+  {
+    id: "auto",
+    title: "Auto",
+    description:
+      "AI determines the best length based on your question's complexity",
+    prompt:
+      "IMPORTANT: Carefully assess the complexity and scope of the question, then adjust your response length accordingly. For simple questions, be brief (2-4 sentences). For moderate questions, provide balanced detail (1-2 paragraphs). For complex questions, give comprehensive answers with appropriate depth. Always match the response length to what the question actually requires - no more, no less.",
+  },
   {
     id: "short",
     title: "Short",
@@ -29,12 +37,11 @@ export const RESPONSE_LENGTHS: ResponseLengthOption[] = [
       "IMPORTANT: Provide responses with moderate length - not too brief, not too lengthy. Keep your answer to 1-2 paragraphs (approximately 4-8 sentences). Include key explanations and relevant details, but avoid being overly verbose or adding unnecessary elaboration. Stay focused and well-organized. This is a strict requirement.",
   },
   {
-    id: "auto",
-    title: "Auto",
-    description:
-      "AI determines the best length based on your question's complexity",
+    id: "long",
+    title: "Long",
+    description: "Thorough, comprehensive answers with depth and reasoning",
     prompt:
-      "IMPORTANT: Carefully assess the complexity and scope of the question, then adjust your response length accordingly. For simple questions, be brief (2-4 sentences). For moderate questions, provide balanced detail (1-2 paragraphs). For complex questions, give comprehensive answers with appropriate depth. Always match the response length to what the question actually requires - no more, no less.",
+      "IMPORTANT: Provide a thorough, comprehensive answer. Use multiple well-structured paragraphs with depth, concrete examples, and reasoning. Be complete without padding or repetition. This is a strict requirement.",
   },
 ];
 
