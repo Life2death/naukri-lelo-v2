@@ -443,9 +443,15 @@ export const useCompletion = () => {
           failoverChain,
           systemPrompt: effectivePrompt?.text,
           segments: effectivePrompt?.segments,
-          history: state.conversationHistory
-            .map((msg: any) => ({ role: msg.role, content: msg.content }))
-            .slice(-6),
+          // Strip the trailing turn so the model doesn't see Q twice
+          history: (() => {
+            const trimmed = [...state.conversationHistory];
+            if (trimmed.length > 0 && trimmed[trimmed.length - 1].role === "assistant") trimmed.pop();
+            if (trimmed.length > 0 && trimmed[trimmed.length - 1].role === "user") trimmed.pop();
+            return trimmed
+              .map((msg: any) => ({ role: msg.role, content: msg.content }))
+              .slice(-6);
+          })(),
           userMessage: lastMsg,
           imagesBase64: lastImagesRef.current,
           signal,
