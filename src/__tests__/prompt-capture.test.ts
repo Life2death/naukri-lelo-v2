@@ -25,8 +25,9 @@ import {
   getPromptCaptures,
   clearPromptCaptures,
   subscribe,
+  notifyUsageUpdate,
 } from "@/lib/debug/prompt-capture";
-import { redactHeaders } from "@/lib/debug/prompt-capture";
+
 
 describe("isDebugCaptureEnabled / setDebugCaptureEnabled", () => {
   beforeEach(() => {
@@ -155,47 +156,74 @@ describe("recordPromptCapture", () => {
   });
 });
 
-describe("redactHeaders", () => {
-  it("redacts Authorization header", () => {
-    const headers = { Authorization: "Bearer sk-test123" };
-    const result = redactHeaders(headers);
-    expect(result.Authorization).toBe("[REDACTED]");
+describe("stripImageData (via recordPromptCapture)", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+    clearPromptCaptures();
   });
 
-  it("redacts x-api-key header", () => {
-    const headers = { "x-api-key": "sk-abc123" };
-    const result = redactHeaders(headers);
-    expect(result["x-api-key"]).toBe("[REDACTED]");
-  });
-
-  it("redacts any header containing 'key'", () => {
-    const headers = { "X-Custom-Key": "some-value", "APIKEY": "value" };
-    const result = redactHeaders(headers);
-    expect(result["X-Custom-Key"]).toBe("[REDACTED]");
-    expect(result["APIKEY"]).toBe("[REDACTED]");
-  });
-
-  it("redacts any header containing 'token'", () => {
-    const headers = { "X-Auth-Token": "tok-123" };
-    const result = redactHeaders(headers);
-    expect(result["X-Auth-Token"]).toBe("[REDACTED]");
-  });
-
-  it("leaves other headers intact", () => {
-    const headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
-    const result = redactHeaders(headers);
-    expect(result["Content-Type"]).toBe("application/json");
-    expect(result["anthropic-version"]).toBe("2023-06-01");
-  });
-
-  it("no raw key string appears anywhere in the serialized capture", () => {
+  it("elides base64 image data in stored messages", () => {
     setDebugCaptureEnabled(true);
-    const rawHeaders = { Authorization: "Bearer sk-test-abc" };
-    const redacted = redactHeaders(rawHeaders);
-    const serialized = JSON.stringify(redacted);
-    expect(serialized).not.toContain("sk-test-abc");
-    expect(serialized).not.toContain("Bearer");
-    expect(serialized).toContain("[REDACTED]");
+    // Build a >200-char fake base64 string to trigger the elision check
+    const longBase64 = "iVBORw0KGgo" + "A".repeat(250);
+    recordPromptCapture({
+      source: "overlay",
+      providerId: "test",
+      model: "test-model",
+      segments: [],
+      enhancedSystemPrompt: "test",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "describe this" },
+            { type: "image_url", image_url: { url: "data:image/png;base64," + longBase64 } },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: longBase64 } },
+          ],
+        },
+      ],
+    });
+    const captures = getPromptCaptures();
+    expect(captures).toHaveLength(1);
+    const msg = captures[0].messages[0] as any;
+    const imageUrlContent = msg.content[1].image_url.url;
+    const imageSourceData = msg.content[2].source.data;
+    expect(imageUrlContent).toContain("[elided]");
+    expect(imageUrlContent).not.toContain(longBase64.slice(0, 20));
+    expect(imageSourceData).toMatch(/\[elided/);
+    expect(imageSourceData).not.toContain(longBase64.slice(0, 20));
+  });
+});
+
+describe("notifyUsageUpdate", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+    clearPromptCaptures();
+  });
+
+  it("notifies subscribers when usage is updated", () => {
+    setDebugCaptureEnabled(true);
+    const listener = vi.fn();
+    subscribe(listener);
+    const entry = {
+      id: "test-id",
+      timestamp: Date.now(),
+      source: "overlay" as const,
+      providerId: "test",
+      model: "test-model",
+      segments: [] as any[],
+      enhancedSystemPrompt: "test",
+      messages: [],
+      tokenEstimate: 5,
+      usage: { cache_read_input_tokens: 100 },
+    };
+
+    notifyUsageUpdate(entry);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(entry);
   });
 });
 

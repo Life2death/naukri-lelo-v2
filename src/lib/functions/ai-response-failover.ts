@@ -2,40 +2,37 @@ import { fetchAIResponse } from "./ai-response.function";
 import type { FetchAIResponseParams } from "./ai-response.function";
 import type { TYPE_PROVIDER } from "@/types";
 
+export interface FailoverChainEntry {
+  provider: TYPE_PROVIDER;
+  variables: Record<string, string>;
+}
+
 export interface FailoverParams extends FetchAIResponseParams {
-  /** Ordered list of providers to try before giving up. First entry is the primary. */
-  failoverChain?: TYPE_PROVIDER[];
+  /** Ordered list of providers with their own variables to try before giving up. First entry is the primary. */
+  failoverChain?: FailoverChainEntry[];
   /** When true, non-retryable errors (4xx) also advance the chain instead of surfacing. */
   alwaysFallOver?: boolean;
 }
 
-/**
- * Check whether a yielded error string or an Error indicates a retryable failure.
- * `fetchAIResponse` handles network & HTTP errors by yielding diagnostic strings.
- */
 function isRetryableFailure(chunkOrError: string | Error): boolean {
   const msg = typeof chunkOrError === "string" ? chunkOrError.toLowerCase() : chunkOrError.message.toLowerCase();
 
-  // Network-level failures — retryable
   if (msg.includes("network error")) return true;
   if (msg.includes("fetch failed")) return true;
   if (msg.includes("econnrefused")) return true;
   if (msg.includes("enotfound")) return true;
   if (msg.includes("timeout")) return true;
 
-  // Retryable HTTP status codes (5xx, 429, 529)
   if (msg.includes("api request failed: 5")) return true;
   if (msg.includes("api request failed: 429")) return true;
   if (msg.includes("api request failed: 529")) return true;
 
-  // Streaming errors
-  if (msg.includes("streaming not supported")) return false; // Config issue, not retryable
+  if (msg.includes("streaming not supported")) return false;
   if (msg.includes("error reading stream")) return true;
 
   return false;
 }
 
-/** True if the string looks like an error message from fetchAIResponse (not actual content). */
 function isErrorChunk(chunk: string): boolean {
   const lower = chunk.toLowerCase();
   return (
@@ -52,10 +49,11 @@ export async function* fetchAIResponseWithFailover(
 ): AsyncIterable<string> {
   const { failoverChain, alwaysFallOver, selectedProvider, ...rest } = params;
 
+  // Build the attempt chain: if failoverChain provided, use it; otherwise fall back to single-provider
   const chain = failoverChain && failoverChain.length > 0
     ? failoverChain
     : rest.provider
-      ? [rest.provider]
+      ? [{ provider: rest.provider, variables: selectedProvider?.variables || {} }]
       : [];
 
   if (chain.length === 0) {
@@ -63,10 +61,10 @@ export async function* fetchAIResponseWithFailover(
     return;
   }
 
-  // Deduplicate chain so we never try the same provider twice
+  // Deduplicate by provider id
   const seen = new Set<string>();
-  const dedupedChain = chain.filter((p) => {
-    const id = p.id || "unknown";
+  const dedupedChain = chain.filter((entry) => {
+    const id = entry.provider.id || "unknown";
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
@@ -75,23 +73,21 @@ export async function* fetchAIResponseWithFailover(
   let lastError: Error | undefined;
   let hasYielded = false;
 
-  for (const provider of dedupedChain) {
-    // If any chunk was yielded by a previous provider, do NOT fail over
+  for (const entry of dedupedChain) {
     if (hasYielded) {
       throw lastError || new Error("Stream error occurred after first token — mid-stream failover is not allowed");
     }
 
-    // Check for user-initiated abort
     if (params.signal?.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
 
     const attemptParams: FetchAIResponseParams = {
       ...rest,
-      provider,
+      provider: entry.provider,
       selectedProvider: {
-        provider: provider.id || "unknown",
-        variables: selectedProvider?.variables || {},
+        provider: entry.provider.id || "unknown",
+        variables: entry.variables,
       },
     };
 
@@ -100,44 +96,36 @@ export async function* fetchAIResponseWithFailover(
 
       for await (const chunk of fetchAIResponse(attemptParams)) {
         if (yieldedContent) {
-          // Already yielding content — pass through everything
           yield chunk;
           continue;
         }
 
-        // First chunk — is it an error?
         if (isErrorChunk(chunk)) {
           if (isRetryableFailure(chunk) || alwaysFallOver) {
             lastError = new Error(chunk);
-            break; // Advance to next provider
+            break;
           }
-          // Non-retryable error — surface to user
           yield chunk;
           return;
         }
 
-        // First real content chunk
         yieldedContent = true;
         hasYielded = true;
         yield chunk;
       }
 
       if (yieldedContent) return;
-      // No content yielded — will try next provider (if any)
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       lastError = err;
 
-      // User-initiated abort — propagate immediately
       if (err instanceof DOMException && err.name === "AbortError") {
         throw err;
       }
 
-      // Re-throw non-retryable unless alwaysFallOver
       if (!isRetryableFailure(err) && !alwaysFallOver) {
         throw err;
       }
-      // Retryable: continue to next provider
     }
   }
 
@@ -145,7 +133,6 @@ export async function* fetchAIResponseWithFailover(
     throw new Error(`All providers failed. Last error: ${lastError.message}`);
   }
 
-  // If signal was aborted, surface that
   if (params.signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");
   }

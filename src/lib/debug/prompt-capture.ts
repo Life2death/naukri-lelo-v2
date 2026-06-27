@@ -52,26 +52,28 @@ export function setDebugCaptureEnabled(enabled: boolean): void {
   }
 }
 
-function redactHeaders(headers: Record<string, string>): Record<string, string> {
-  const redacted: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    const lower = key.toLowerCase();
-    if (
-      lower === "authorization" ||
-      lower === "x-api-key" ||
-      lower.includes("key") ||
-      lower.includes("token")
-    ) {
-      redacted[key] = "[REDACTED]";
-    } else {
-      redacted[key] = value;
-    }
-  }
-  return redacted;
-}
-
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * Strip large base64 image data from stored messages so captures don't blow localStorage.
+ * Elides `data:image/...` URLs and any string values > 200 chars that look like base64.
+ */
+function stripImageData(messages: unknown[]): unknown[] {
+  return JSON.parse(
+    JSON.stringify(messages),
+    (_key: string, value: unknown) => {
+      if (typeof value === "string" && value.startsWith("data:image/")) {
+        const comma = value.indexOf(",");
+        return comma > 0 ? value.slice(0, comma + 1) + "[elided]" : value;
+      }
+      if (typeof value === "string" && value.length > 200 && /^[A-Za-z0-9+/=]+$/.test(value)) {
+        return "[elided base64]";
+      }
+      return value;
+    }
+  );
 }
 
 export function recordPromptCapture(entry: Omit<PromptCaptureEntry, "id" | "timestamp" | "tokenEstimate">): void {
@@ -83,6 +85,7 @@ export function recordPromptCapture(entry: Omit<PromptCaptureEntry, "id" | "time
     timestamp: Date.now(),
     tokenEstimate: estimateTokens(entry.enhancedSystemPrompt),
     segments: entry.segments,
+    messages: stripImageData(entry.messages),
   };
 
   ringBuffer.push(full);
@@ -98,6 +101,12 @@ export function recordPromptCapture(entry: Omit<PromptCaptureEntry, "id" | "time
 
   for (const cb of listeners) {
     try { cb(full); } catch { /* ignore listener errors */ }
+  }
+}
+
+export function notifyUsageUpdate(entry: PromptCaptureEntry): void {
+  for (const cb of listeners) {
+    try { cb(entry); } catch { /* ignore listener errors */ }
   }
 }
 
@@ -124,26 +133,4 @@ export function subscribe(cb: Listener): () => void {
   return () => { listeners.delete(cb); };
 }
 
-export function instrumentCaptureParams(params: {
-  source: "overlay" | "chat" | "audio";
-  providerId: string;
-  model: string;
-  segments: PromptCaptureSegment[];
-  enhancedSystemPrompt: string;
-  messages: unknown[];
-  headers: Record<string, string>;
-}): void {
-  if (!isDebugCaptureEnabled()) return;
 
-  recordPromptCapture({
-    source: params.source,
-    providerId: params.providerId,
-    model: params.model,
-    segments: params.segments,
-    enhancedSystemPrompt: params.enhancedSystemPrompt,
-    messages: params.messages,
-    usage: undefined,
-  });
-}
-
-export { redactHeaders };

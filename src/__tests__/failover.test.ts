@@ -71,7 +71,7 @@ const providerB: TYPE_PROVIDER = {
 
 const selectedProvider = {
   provider: "provider-a",
-  variables: { api_key: "test-key", model: "test-model" },
+  variables: { api_key: "primary-key", model: "primary-model" },
 };
 
 function makeOkStream(chunks: string[]): Response {
@@ -123,12 +123,13 @@ describe("fetchAIResponseWithFailover", () => {
   });
 
   it("falls over to the next provider on a retryable error before first token", async () => {
-    // First call: network error
     mockFetch.mockRejectedValueOnce(new Error("fetch failed"));
-    // Second call: success
     mockFetch.mockResolvedValueOnce(makeOkStream(["from b"]));
 
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -140,6 +141,36 @@ describe("fetchAIResponseWithFailover", () => {
     expect(chunks.join("")).toBe("from b");
   });
 
+  it("uses each provider's own variables (BLOCKER 1 guard)", async () => {
+    // Both calls succeed but we spy on the request body to verify variables
+    mockFetch.mockRejectedValueOnce(new Error("fetch failed"));
+    mockFetch.mockResolvedValueOnce(makeOkStream(["from b"]));
+
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
+    await collectChunks(
+      fetchAIResponseWithFailover({
+        provider: providerA,
+        selectedProvider,
+        failoverChain,
+        userMessage: "hi",
+      })
+    );
+
+    // Provider A should be called with key-a (not primary-key)
+    const firstCallBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const secondCallBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    // Model comes from the entry's variables substituted via deepVariableReplacer
+    // We verify the fetch was called for each provider
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // Check the URL used (different providers, different URLs from curl)
+    // The curl template models don't vary URL in the mock, so we verify via body.model
+    expect(firstCallBody.model).toBe("model-a");
+    expect(secondCallBody.model).toBe("model-b");
+  });
+
   it("does not fail over once a chunk has been yielded", async () => {
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
@@ -148,12 +179,12 @@ describe("fetchAIResponseWithFailover", () => {
         controller.close();
       },
     });
-    // First provider yields a chunk but then errors (simulated via partial stream, then error)
-    // A stream that yields content and then has an issue — we'll mock an ok stream that delivers a chunk
     mockFetch.mockResolvedValueOnce({ ok: true, body } as unknown as Response);
 
-    // Second provider should never be called
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -163,14 +194,16 @@ describe("fetchAIResponseWithFailover", () => {
       })
     );
     expect(chunks.join("")).toBe("partial");
-    // fetch should have been called only once (for provider A)
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("throws when all providers fail", async () => {
     mockFetch.mockRejectedValue(new Error("fetch failed"));
 
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     await expect(
       collectChunks(
         fetchAIResponseWithFailover({
@@ -186,7 +219,10 @@ describe("fetchAIResponseWithFailover", () => {
   it("propagates non-retryable errors (400) without failing over", async () => {
     mockFetch.mockResolvedValueOnce(makeErrorResponse(400, "Bad Request"));
 
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -195,9 +231,7 @@ describe("fetchAIResponseWithFailover", () => {
         userMessage: "hi",
       })
     );
-    // 400 is not retryable — the API error string should be yielded
     expect(chunks.join("")).toMatch(/API request failed.*400/i);
-    // Only provider A was contacted
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -205,7 +239,10 @@ describe("fetchAIResponseWithFailover", () => {
     mockFetch.mockResolvedValueOnce(makeErrorResponse(400, "Bad Request"));
     mockFetch.mockResolvedValueOnce(makeOkStream(["from b"]));
 
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -222,7 +259,10 @@ describe("fetchAIResponseWithFailover", () => {
     mockFetch.mockResolvedValueOnce(makeErrorResponse(503, "Service Unavailable"));
     mockFetch.mockResolvedValueOnce(makeOkStream(["from b"]));
 
-    const failoverChain = [providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
+      { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -235,11 +275,14 @@ describe("fetchAIResponseWithFailover", () => {
   });
 
   it("skips duplicates in the failover chain", async () => {
-    // Chain has A, A, B — should try A then B (skip duplicate A)
     mockFetch.mockRejectedValueOnce(new Error("fetch failed"));
     mockFetch.mockResolvedValueOnce(makeOkStream(["from b"]));
 
-    const failoverChain = [providerA, providerA, providerB];
+    const failoverChain = [
+      { provider: providerA, variables: { api_key: "a", model: "m-a" } },
+      { provider: providerA, variables: { api_key: "a-dup", model: "m-a" } },
+      { provider: providerB, variables: { api_key: "b", model: "m-b" } },
+    ];
     const chunks = await collectChunks(
       fetchAIResponseWithFailover({
         provider: providerA,
@@ -262,12 +305,15 @@ describe("fetchAIResponseWithFailover", () => {
         fetchAIResponseWithFailover({
           provider: providerA,
           selectedProvider,
-          failoverChain: [providerA, providerB],
+          failoverChain: [
+            { provider: providerA, variables: { api_key: "k", model: "m" } },
+            { provider: providerB, variables: { api_key: "k", model: "m" } },
+          ],
           userMessage: "hi",
           signal: abortController.signal,
         })
       )
-    )      .rejects.toThrow(/Aborted/);
+    ).rejects.toThrow(/Aborted/);
 
     expect(mockFetch).not.toHaveBeenCalled();
   });

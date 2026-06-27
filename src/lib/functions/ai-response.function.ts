@@ -8,8 +8,8 @@ import {
 import { Message, TYPE_PROVIDER } from "@/types";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import curl2Json from "@bany/curl-to-json";
-import { getResponseSettings, RESPONSE_LENGTHS, LANGUAGES } from "@/lib";
-import { MARKDOWN_FORMATTING_INSTRUCTIONS } from "@/config/constants";
+import { getResponseSettings, RESPONSE_LENGTHS, LANGUAGES, DEFAULT_LANGUAGE } from "@/lib";
+import { MARKDOWN_FORMATTING_INSTRUCTIONS, STORAGE_KEYS } from "@/config/constants";
 import {
   isDebugCaptureEnabled,
   recordPromptCapture,
@@ -43,7 +43,7 @@ export function buildEnhancedSystemPrompt(
   const languageOption = LANGUAGES.find(
     (l) => l.id === responseSettings.language
   );
-  if (languageOption?.prompt?.trim() && responseSettings.language !== "en") {
+  if (languageOption?.prompt?.trim() && responseSettings.language !== DEFAULT_LANGUAGE) {
     prompts.push(languageOption.prompt);
   }
 
@@ -56,7 +56,7 @@ export function buildEnhancedSystemPrompt(
   if (lengthOption?.prompt?.trim()) {
     segments.push({ name: "lengthRule", text: lengthOption.prompt });
   }
-  if (languageOption?.prompt?.trim() && responseSettings.language !== "en") {
+  if (languageOption?.prompt?.trim() && responseSettings.language !== DEFAULT_LANGUAGE) {
     segments.push({ name: "language", text: languageOption.prompt });
   }
   segments.push({ name: "markdown", text: MARKDOWN_FORMATTING_INSTRUCTIONS });
@@ -358,12 +358,22 @@ export async function* fetchAIResponse(
 
     // Update capture with real usage if available
     if (isDebugCaptureEnabled() && capturedUsage) {
-      const captures = await import("@/lib/debug/prompt-capture").then(
-        (m) => m.getPromptCaptures()
-      );
+      const promptCapture = await import("@/lib/debug/prompt-capture");
+      const captures = promptCapture.getPromptCaptures();
       const latest = captures[captures.length - 1];
       if (latest && !latest.usage) {
         latest.usage = capturedUsage;
+        // Re-write localStorage so the Dev Space inspector (separate webview) sees cache tokens
+        try {
+          localStorage.setItem(
+            STORAGE_KEYS.PROMPT_CAPTURE_LAST,
+            JSON.stringify(latest)
+          );
+        } catch {
+          // localStorage quota or other storage error
+        }
+        // Notify same-window subscribers
+        promptCapture.notifyUsageUpdate(latest);
       }
     }
   } catch (error) {

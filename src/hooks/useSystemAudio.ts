@@ -103,6 +103,7 @@ export function useSystemAudio() {
     allSttProviders,
     selectedAIProvider,
     allAiProviders,
+    providerVariables,
     systemPrompt,
     selectedAudioDevices,
   } = useApp();
@@ -502,9 +503,14 @@ export function useSystemAudio() {
         try {
           const failoverEnabled = getFailoverEnabled();
           const failoverChain = failoverEnabled
-            ? [provider, ...getFailoverChain()
-                .map((id) => allAiProviders.find((p) => p.id === id))
-                .filter((p): p is NonNullable<typeof p> => p != null && p.id !== selectedAIProvider.provider)]
+            ? [
+                { provider, variables: providerVariables[provider.id || ""] || {} },
+                ...getFailoverChain()
+                  .filter((id) => id !== selectedAIProvider.provider)
+                  .map((id) => allAiProviders.find((p) => p.id === id))
+                  .filter((p): p is NonNullable<typeof p> => p != null)
+                  .map((p) => ({ provider: p, variables: providerVariables[p.id || ""] || {} })),
+              ]
             : undefined;
           for await (const chunk of fetchAIResponseWithFailover({
             provider: provider,
