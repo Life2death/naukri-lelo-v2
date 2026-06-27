@@ -67,8 +67,6 @@ export const Input = ({
             {/* Conversation thread indicator */}
               {/* Right-side action buttons */}
               <div className="absolute select-none right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                <ResponseQuickSettings />
-
                 {currentConversationId &&
                   conversationHistory.length > 0 &&
                   !isLoading && (
@@ -128,6 +126,7 @@ export const Input = ({
                   }}
                 />
               </div>
+              <ResponseQuickSettings />
               <CopyButton content={response} />
               <Button
                 size="icon"

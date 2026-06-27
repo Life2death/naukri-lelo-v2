@@ -28,6 +28,7 @@ export const ResponseQuickSettings = () => {
   }, [sync]);
 
   const handleChange = (id: string) => {
+    setSelectedLength(id); // update UI immediately; the event/sync keeps the other surfaces in step
     updateResponseLength(id);
   };
 
