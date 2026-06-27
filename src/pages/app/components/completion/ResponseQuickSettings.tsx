@@ -7,7 +7,7 @@ import {
 import { RESPONSE_LENGTHS } from "@/lib";
 import { updateResponseLength, getResponseSettings } from "@/lib";
 import { useState, useEffect, useCallback } from "react";
-import { TextSelect, Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 
 export const ResponseQuickSettings = () => {
   const [selectedLength, setSelectedLength] = useState<string>("short");
@@ -38,12 +38,12 @@ export const ResponseQuickSettings = () => {
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          size="icon"
           variant="ghost"
-          className="h-6 w-6 cursor-pointer"
+          className="h-6 px-1.5 text-[11px] font-medium gap-0.5 cursor-pointer"
           title={`Response: ${label}`}
         >
-          <TextSelect className="h-3.5 w-3.5" />
+          {label}
+          <ChevronDown className="h-3 w-3" />
         </Button>
       </PopoverTrigger>
       <PopoverContent

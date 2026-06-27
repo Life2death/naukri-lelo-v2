@@ -1,17 +1,27 @@
 import { Card, Header } from "@/components";
 import { RESPONSE_LENGTHS } from "@/lib";
 import { updateResponseLength } from "@/lib/storage/response-settings.storage";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { getResponseSettings } from "@/lib";
 import { CheckCircle2 } from "lucide-react";
 
 export const ResponseLength = () => {
   const [selectedLength, setSelectedLength] = useState<string>("auto");
 
-  useEffect(() => {
+  const sync = useCallback(() => {
     const settings = getResponseSettings();
     setSelectedLength(settings.responseLength);
   }, []);
+
+  useEffect(() => {
+    sync();
+    window.addEventListener("storage", sync);
+    window.addEventListener("response-settings-changed", sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      window.removeEventListener("response-settings-changed", sync);
+    };
+  }, [sync]);
 
   const handleLengthChange = (lengthId: string) => {
     setSelectedLength(lengthId);
