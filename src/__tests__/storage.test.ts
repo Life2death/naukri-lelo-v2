@@ -48,40 +48,32 @@ describe("safeLocalStorage", () => {
   });
 });
 
-// ── getResponseSettings per-surface defaults (Part D1) ─────────────────────
+// ── getResponseSettings (Phase E — single source of truth) ─────────────────
 
 import { getResponseSettings, setResponseSettings } from "@/lib/storage/response-settings.storage";
 
-describe("getResponseSettings per-surface default (D1)", () => {
+describe("getResponseSettings (E1 — single source of truth)", () => {
   beforeEach(() => {
     localStorageMock.clear();
     vi.clearAllMocks();
   });
 
-  it('returns "short" for overlay when unset', () => {
-    const settings = getResponseSettings("overlay");
+  it('defaults to "short" when unset (global default)', () => {
+    const settings = getResponseSettings();
     expect(settings.responseLength).toBe("short");
+    expect(settings.language).toBe("english");
+    expect(settings.autoScroll).toBe(true);
   });
 
-  it('returns "auto" for chat when unset', () => {
-    const settings = getResponseSettings("chat");
-    expect(settings.responseLength).toBe("auto");
-  });
-
-  it("stored value overrides overlay default", () => {
+  it("stored value overrides the global default", () => {
     setResponseSettings({ responseLength: "medium", language: "english", autoScroll: true });
-    const settings = getResponseSettings("overlay");
+    const settings = getResponseSettings();
     expect(settings.responseLength).toBe("medium");
   });
 
-  it("stored value overrides chat default", () => {
-    setResponseSettings({ responseLength: "short", language: "english", autoScroll: true });
-    const settings = getResponseSettings("chat");
-    expect(settings.responseLength).toBe("short");
-  });
-
-  it("returns generic defaults when called without source", () => {
+  it("partial stored values use defaults for missing keys", () => {
+    setResponseSettings({ responseLength: "medium", language: "english", autoScroll: true });
     const settings = getResponseSettings();
-    expect(settings.responseLength).toBe("auto");
+    expect(settings.responseLength).toBe("medium");
   });
 });

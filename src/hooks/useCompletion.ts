@@ -883,7 +883,7 @@ export const useCompletion = () => {
 
   // Auto scroll to bottom when response updates
   useEffect(() => {
-    const responseSettings = getResponseSettings("overlay");
+    const responseSettings = getResponseSettings();
     if (
       !keepEngaged &&
       state.response &&

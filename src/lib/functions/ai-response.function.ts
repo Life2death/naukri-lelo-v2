@@ -22,10 +22,9 @@ export interface PromptSegment {
 
 export function buildEnhancedSystemPrompt(
   baseSystemPrompt?: string,
-  incomingSegments?: PromptSegment[],
-  source?: "overlay" | "chat" | "audio"
+  incomingSegments?: PromptSegment[]
 ): { text: string; segments: PromptSegment[] } {
-  const responseSettings = getResponseSettings(source);
+  const responseSettings = getResponseSettings();
   const prompts: string[] = [];
 
   if (baseSystemPrompt) {
@@ -104,7 +103,7 @@ export async function* fetchAIResponse(
     }
 
     const { text: enhancedSystemPrompt, segments: promptSegments } =
-      buildEnhancedSystemPrompt(systemPrompt, incomingSegments, params._source);
+      buildEnhancedSystemPrompt(systemPrompt, incomingSegments);
 
     if (!provider) {
       throw new Error(`Provider not provided`);

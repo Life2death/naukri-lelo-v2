@@ -90,7 +90,7 @@ export const useChatCompletion = (
   }, [screenshotConfiguration]);
 
   const scrollToBottom = () => {
-    const responseSettings = getResponseSettings("chat");
+    const responseSettings = getResponseSettings();
     if (responseSettings.autoScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }

@@ -215,6 +215,6 @@ export const LANGUAGES: LanguageOption[] = [
   },
 ];
 
-export const DEFAULT_RESPONSE_LENGTH = "auto";
+export const DEFAULT_RESPONSE_LENGTH = "short";
 export const DEFAULT_LANGUAGE = "english";
 export const DEFAULT_AUTO_SCROLL = true;

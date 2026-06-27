@@ -17,26 +17,15 @@ export const DEFAULT_RESPONSE_SETTINGS: ResponseSettings = {
   autoScroll: DEFAULT_AUTO_SCROLL,
 };
 
-/**
- * Get response settings from localStorage.
- * When `source` is provided and no explicit value is stored, use a per-surface default:
- * - "overlay" → responseLength defaults to "short"
- * - "chat"    → responseLength defaults to "auto"
- */
-export const getResponseSettings = (
-  source?: "overlay" | "chat" | "audio"
-): ResponseSettings => {
+export const getResponseSettings = (): ResponseSettings => {
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.RESPONSE_SETTINGS);
-    if (!stored) {
-      return getDefaultForSource(source);
-    }
+    if (!stored) return { ...DEFAULT_RESPONSE_SETTINGS };
 
     const parsedSettings = JSON.parse(stored);
 
     return {
-      responseLength:
-        parsedSettings.responseLength || getDefaultForSource(source).responseLength,
+      responseLength: parsedSettings.responseLength || DEFAULT_RESPONSE_SETTINGS.responseLength,
       language: parsedSettings.language || DEFAULT_RESPONSE_SETTINGS.language,
       autoScroll:
         parsedSettings.autoScroll !== undefined
@@ -45,35 +34,22 @@ export const getResponseSettings = (
     };
   } catch (error) {
     console.error("Failed to get response settings:", error);
-    return getDefaultForSource(source);
+    return { ...DEFAULT_RESPONSE_SETTINGS };
   }
 };
 
-/** Returns a ResponseSettings with per-source defaults */
-function getDefaultForSource(source?: "overlay" | "chat" | "audio"): ResponseSettings {
-  if (source === "overlay") {
-    return { responseLength: "short", language: DEFAULT_LANGUAGE, autoScroll: DEFAULT_AUTO_SCROLL };
-  }
-  return DEFAULT_RESPONSE_SETTINGS;
-}
-
-/**
- * Save response settings to localStorage
- */
 export const setResponseSettings = (settings: ResponseSettings): void => {
   try {
     localStorage.setItem(
       STORAGE_KEYS.RESPONSE_SETTINGS,
       JSON.stringify(settings)
     );
+    window.dispatchEvent(new Event("response-settings-changed"));
   } catch (error) {
     console.error("Failed to save response settings:", error);
   }
 };
 
-/**
- * Update response length
- */
 export const updateResponseLength = (
   responseLength: string
 ): ResponseSettings => {
@@ -83,9 +59,6 @@ export const updateResponseLength = (
   return newSettings;
 };
 
-/**
- * Update language
- */
 export const updateLanguage = (language: string): ResponseSettings => {
   const currentSettings = getResponseSettings();
   const newSettings = { ...currentSettings, language };
@@ -93,9 +66,6 @@ export const updateLanguage = (language: string): ResponseSettings => {
   return newSettings;
 };
 
-/**
- * Update auto-scroll
- */
 export const updateAutoScroll = (autoScroll: boolean): ResponseSettings => {
   const currentSettings = getResponseSettings();
   const newSettings = { ...currentSettings, autoScroll };

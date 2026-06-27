@@ -1,0 +1,73 @@
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Button,
+} from "@/components";
+import { RESPONSE_LENGTHS } from "@/lib";
+import { updateResponseLength, getResponseSettings } from "@/lib";
+import { useState, useEffect, useCallback } from "react";
+import { TextSelect, Check } from "lucide-react";
+
+export const ResponseQuickSettings = () => {
+  const [selectedLength, setSelectedLength] = useState<string>("short");
+
+  const sync = useCallback(() => {
+    const settings = getResponseSettings();
+    setSelectedLength(settings.responseLength);
+  }, []);
+
+  useEffect(() => {
+    sync();
+    window.addEventListener("storage", sync);
+    window.addEventListener("response-settings-changed", sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      window.removeEventListener("response-settings-changed", sync);
+    };
+  }, [sync]);
+
+  const handleChange = (id: string) => {
+    updateResponseLength(id);
+  };
+
+  const current = RESPONSE_LENGTHS.find((l) => l.id === selectedLength);
+  const label = current?.title || "Short";
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6 cursor-pointer"
+          title={`Response: ${label}`}
+        >
+          <TextSelect className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        className="w-44 p-1"
+        sideOffset={4}
+      >
+        {RESPONSE_LENGTHS.map((length) => (
+          <Button
+            key={length.id}
+            variant={selectedLength === length.id ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2 text-xs cursor-pointer"
+            onClick={() => handleChange(length.id)}
+          >
+            {selectedLength === length.id ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <span className="h-3.5 w-3.5" />
+            )}
+            {length.title}
+          </Button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+};

@@ -13,6 +13,7 @@ import {
 import { UseCompletionReturn } from "@/types";
 import { MessageHistory } from "./MessageHistory";
 import { ProfileContextBanner } from "./ProfileContextBanner";
+import { ResponseQuickSettings } from "./ResponseQuickSettings";
 
 export const Input = ({
   isPopoverOpen,
@@ -58,32 +59,34 @@ export const Input = ({
               disabled={isLoading || isHidden}
               className={`${
                 currentConversationId && conversationHistory.length > 0
-                  ? "pr-14"
-                  : "pr-2"
+                  ? "pr-20"
+                  : "pr-10"
               }`}
             />
 
             {/* Conversation thread indicator */}
-            {currentConversationId &&
-              conversationHistory.length > 0 &&
-              !isLoading && (
-                <div className="absolute select-none right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <MessageHistory
-                    conversationHistory={conversationHistory}
-                    currentConversationId={currentConversationId}
-                    onStartNewConversation={startNewConversation}
-                    messageHistoryOpen={messageHistoryOpen}
-                    setMessageHistoryOpen={setMessageHistoryOpen}
-                  />
-                </div>
-              )}
+              {/* Right-side action buttons */}
+              <div className="absolute select-none right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                <ResponseQuickSettings />
 
-            {/* Loading indicator */}
-            {isLoading && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 animate-pulse">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                {currentConversationId &&
+                  conversationHistory.length > 0 &&
+                  !isLoading && (
+                    <MessageHistory
+                      conversationHistory={conversationHistory}
+                      currentConversationId={currentConversationId}
+                      onStartNewConversation={startNewConversation}
+                      messageHistoryOpen={messageHistoryOpen}
+                      setMessageHistoryOpen={setMessageHistoryOpen}
+                    />
+                  )}
+
+                {isLoading && (
+                  <div className="animate-pulse">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
               </div>
-            )}
           </div>
         </PopoverTrigger>
 

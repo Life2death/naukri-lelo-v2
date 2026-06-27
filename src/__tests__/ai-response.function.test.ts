@@ -39,7 +39,41 @@ vi.mock("@/lib", async (importOriginal) => {
 });
 
 vi.mock("@/config/constants", () => ({
+  STORAGE_KEYS: {
+    DEBUG_CAPTURE: "debug_capture",
+    PROMPT_CAPTURE_LAST: "prompt_capture_last",
+    RESPONSE_SETTINGS: "response_settings",
+    THEME: "theme",
+    TRANSPARENCY: "transparency",
+    SYSTEM_PROMPT: "system_prompt",
+    SELECTED_SYSTEM_PROMPT_ID: "selected_system_prompt_id",
+    SCREENSHOT_CONFIG: "screenshot_config",
+    CUSTOM_AI_PROVIDERS: "curl_custom_ai_providers",
+    CUSTOM_SPEECH_PROVIDERS: "curl_custom_speech_providers",
+    SELECTED_AI_PROVIDER: "curl_selected_ai_provider",
+    SELECTED_STT_PROVIDER: "curl_selected_stt_provider",
+    SYSTEM_AUDIO_CONTEXT: "system_audio_context",
+    SYSTEM_AUDIO_QUICK_ACTIONS: "system_audio_quick_actions",
+    CUSTOMIZABLE: "customizable",
+    NAUKRI_LELO_API_ENABLED: "naukri_lelo_api_enabled",
+    SHORTCUTS: "shortcuts",
+    AUTOSTART_INITIALIZED: "autostart_initialized",
+    SELECTED_AUDIO_DEVICES: "selected_audio_devices",
+    SUPPORTS_IMAGES: "supports_images",
+    ACTIVE_PROFILE_ID: "active_profile_id",
+    PROVIDER_VARIABLES: "curl_provider_variables",
+    JOB_PROVIDER: "job_provider",
+    JOB_HISTORY: "job_history",
+    JOB_SEARCH_SKILLS: "job_search_skills",
+    PROFILE_CONTEXT_SETTINGS: "profile_context_settings",
+  },
   MARKDOWN_FORMATTING_INSTRUCTIONS: "",
+  DEFAULT_SYSTEM_PROMPT: "",
+  MAX_FILES: 6,
+  PROVIDER_MODEL_SUGGESTIONS: {},
+  DEFAULT_QUICK_ACTIONS: [],
+  JOB_MAX_AGE_DAYS: 5,
+  JOB_HISTORY_RETENTION_DAYS: 7,
 }));
 
 const mockFetch = vi.fn();
