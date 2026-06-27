@@ -39,10 +39,11 @@ export function buildEnhancedSystemPrompt(
     prompts.push(lengthOption.prompt);
   }
 
+  // Skip language segment when english — the model defaults to english anyway
   const languageOption = LANGUAGES.find(
     (l) => l.id === responseSettings.language
   );
-  if (languageOption?.prompt?.trim()) {
+  if (languageOption?.prompt?.trim() && responseSettings.language !== "en") {
     prompts.push(languageOption.prompt);
   }
 
@@ -55,7 +56,7 @@ export function buildEnhancedSystemPrompt(
   if (lengthOption?.prompt?.trim()) {
     segments.push({ name: "lengthRule", text: lengthOption.prompt });
   }
-  if (languageOption?.prompt?.trim()) {
+  if (languageOption?.prompt?.trim() && responseSettings.language !== "en") {
     segments.push({ name: "language", text: languageOption.prompt });
   }
   segments.push({ name: "markdown", text: MARKDOWN_FORMATTING_INSTRUCTIONS });
