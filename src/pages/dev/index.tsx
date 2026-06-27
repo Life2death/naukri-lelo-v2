@@ -1,4 +1,5 @@
 import { AIProviders, STTProviders, JobDiscoveryConfig } from "./components";
+import { PromptInspector } from "./components/prompt-inspector";
 import Contribute from "@/components/Contribute";
 import { useSettings } from "@/hooks";
 import { PageLayout } from "@/layouts";
@@ -17,6 +18,9 @@ const DevSpace = () => {
 
       {/* Job Discovery Providers (Tavily / Serper) */}
       <JobDiscoveryConfig />
+
+      {/* Prompt Inspector — debug tool for prompt capture + latency analysis */}
+      <PromptInspector />
     </PageLayout>
   );
 };

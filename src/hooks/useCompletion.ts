@@ -97,13 +97,26 @@ export const useCompletion = () => {
 
   /** Builds the effective system prompt, prepending profile knowledge context when a profile is active.
    *  When useFullContext is true, sends the full resume/JD/docs (used by prompt caching).
-   *  Default (false) sends the compact AI-generated brief. Falls back to full context if brief is empty. */
-  const buildEffectiveSystemPrompt = useCallback((useFullContext = false): string | undefined => {
-    const base = systemPrompt || undefined;
-    const profileCtx = useFullContext ? profileContextRef.current : (profileBriefRef.current || profileContextRef.current);
-    if (!profileCtx) return base;
-    return base ? `${profileCtx}\n\n---\n\n${base}` : profileCtx;
-  }, [systemPrompt]);
+   *  Default (false) sends the compact AI-generated brief. Falls back to full context if brief is empty.
+   *  Returns { text, segments } for capture instrumentation. */
+  const buildEffectiveSystemPrompt = useCallback(
+    (useFullContext = false): { text: string; segments: { name: string; text: string }[] } | undefined => {
+      const base = systemPrompt || undefined;
+      const profileCtx = useFullContext
+        ? profileContextRef.current
+        : profileBriefRef.current || profileContextRef.current;
+      if (!profileCtx) {
+        if (!base) return undefined;
+        return { text: base, segments: [{ name: "base", text: base }] };
+      }
+      const text = base ? `${profileCtx}\n\n---\n\n${base}` : profileCtx;
+      const segments: { name: string; text: string }[] = [];
+      segments.push({ name: "profileContext", text: profileCtx });
+      if (base) segments.push({ name: "base", text: base });
+      return { text, segments };
+    },
+    [systemPrompt]
+  );
 
   useEffect(() => {
     screenshotConfigRef.current = screenshotConfiguration;
@@ -260,15 +273,18 @@ export const useCompletion = () => {
         try {
           // TODO: wire full-context toggle from settings — default false (brief mode)
           const FULL_CONTEXT_MODE = false;
+          const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
           // Use the fetchAIResponse function with signal
           for await (const chunk of fetchAIResponse({
             provider: provider,
             selectedProvider: selectedAIProvider,
-            systemPrompt: buildEffectiveSystemPrompt(FULL_CONTEXT_MODE),
+            systemPrompt: effectivePrompt?.text,
+            segments: effectivePrompt?.segments,
             history: messageHistory,
             userMessage: input,
             imagesBase64,
             signal,
+            _source: "overlay",
           })) {
             // Only update if this is still the current request
             if (currentRequestIdRef.current !== requestId) {
@@ -668,15 +684,18 @@ export const useCompletion = () => {
 
             // TODO: wire full-context toggle from settings — default false (brief mode)
             const FULL_CONTEXT_MODE = false;
+            const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
             // Use the fetchAIResponse function with image and signal
             for await (const chunk of fetchAIResponse({
               provider: provider,
               selectedProvider: selectedAIProvider,
-              systemPrompt: buildEffectiveSystemPrompt(FULL_CONTEXT_MODE),
+              systemPrompt: effectivePrompt?.text,
+              segments: effectivePrompt?.segments,
               history: messageHistory,
               userMessage: prompt,
               imagesBase64: [base64],
               signal,
+              _source: "overlay",
             })) {
               // Only update if this is still the current request
               if (currentRequestIdRef.current !== requestId || signal.aborted) {

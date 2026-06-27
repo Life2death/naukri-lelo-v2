@@ -10,8 +10,20 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import curl2Json from "@bany/curl-to-json";
 import { getResponseSettings, RESPONSE_LENGTHS, LANGUAGES } from "@/lib";
 import { MARKDOWN_FORMATTING_INSTRUCTIONS } from "@/config/constants";
+import {
+  isDebugCaptureEnabled,
+  recordPromptCapture,
+} from "@/lib/debug/prompt-capture";
 
-function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
+export interface PromptSegment {
+  name: string;
+  text: string;
+}
+
+export function buildEnhancedSystemPrompt(
+  baseSystemPrompt?: string,
+  incomingSegments?: PromptSegment[]
+): { text: string; segments: PromptSegment[] } {
   const responseSettings = getResponseSettings();
   const prompts: string[] = [];
 
@@ -36,27 +48,48 @@ function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
   // Add markdown formatting instructions
   prompts.push(MARKDOWN_FORMATTING_INSTRUCTIONS);
 
-  return prompts.join(" ");
+  const text = prompts.join(" ");
+
+  const segments: PromptSegment[] = [...(incomingSegments || [])];
+  if (lengthOption?.prompt?.trim()) {
+    segments.push({ name: "lengthRule", text: lengthOption.prompt });
+  }
+  if (languageOption?.prompt?.trim()) {
+    segments.push({ name: "language", text: languageOption.prompt });
+  }
+  segments.push({ name: "markdown", text: MARKDOWN_FORMATTING_INSTRUCTIONS });
+
+  return { text, segments };
 }
 
 
-export async function* fetchAIResponse(params: {
+export type PromptCaptureSource = "overlay" | "chat" | "audio";
+
+export interface FetchAIResponseParams {
   provider: TYPE_PROVIDER | undefined;
   selectedProvider: {
     provider: string;
     variables: Record<string, string>;
   };
   systemPrompt?: string;
+  segments?: PromptSegment[];
   history?: Message[];
   userMessage: string;
   imagesBase64?: string[];
   signal?: AbortSignal;
-}): AsyncIterable<string> {
+  /** Used for prompt-capture source attribution. Only meaningful when DEBUG_CAPTURE is enabled. */
+  _source?: PromptCaptureSource;
+}
+
+export async function* fetchAIResponse(
+  params: FetchAIResponseParams
+): AsyncIterable<string> {
   try {
     const {
       provider,
       selectedProvider,
       systemPrompt,
+      segments: incomingSegments,
       history = [],
       userMessage,
       imagesBase64 = [],
@@ -68,7 +101,8 @@ export async function* fetchAIResponse(params: {
       return;
     }
 
-    const enhancedSystemPrompt = buildEnhancedSystemPrompt(systemPrompt);
+    const { text: enhancedSystemPrompt, segments: promptSegments } =
+      buildEnhancedSystemPrompt(systemPrompt, incomingSegments);
 
     if (!provider) {
       throw new Error(`Provider not provided`);
@@ -145,6 +179,27 @@ export async function* fetchAIResponse(params: {
     const headers = deepVariableReplacer(curlJson.header || {}, allVariables);
     headers["Content-Type"] = "application/json";
 
+    // Capture instrumentation (only when DEBUG_CAPTURE is on)
+    if (isDebugCaptureEnabled() && provider) {
+      const source = params._source || "chat";
+      const model: string =
+        (bodyObj?.model as string) || selectedProvider.variables?.model || "unknown";
+      recordPromptCapture({
+        source,
+        providerId: provider.id || "unknown",
+        model,
+        segments: promptSegments,
+        enhancedSystemPrompt,
+        messages:
+          bodyObj?.[
+            Object.keys(bodyObj).find((k) =>
+              ["messages", "contents", "conversation", "history"].includes(k)
+            ) || ""
+          ] || [],
+        usage: undefined,
+      });
+    }
+
     if (provider?.streaming) {
       if (typeof bodyObj === "object" && bodyObj !== null) {
         const streamKey = Object.keys(bodyObj).find(
@@ -217,6 +272,12 @@ export async function* fetchAIResponse(params: {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let capturedUsage: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    } | undefined;
 
     while (true) {
       // Check if aborted
@@ -260,6 +321,25 @@ export async function* fetchAIResponse(params: {
           if (!trimmed || trimmed === "[DONE]") continue;
           try {
             const parsed = JSON.parse(trimmed);
+            // Parse usage from streaming chunks
+            if (parsed.type === "message_start" && parsed.message?.usage) {
+              capturedUsage = {
+                ...capturedUsage,
+                ...parsed.message.usage,
+              };
+            }
+            if (parsed.type === "message_delta" && parsed.usage) {
+              capturedUsage = {
+                ...capturedUsage,
+                ...parsed.usage,
+              };
+            }
+            if (parsed.usage && !parsed.type) {
+              capturedUsage = {
+                ...capturedUsage,
+                ...parsed.usage,
+              };
+            }
             const delta = getStreamingContent(
               parsed,
               provider?.responseContentPath || ""
@@ -271,6 +351,17 @@ export async function* fetchAIResponse(params: {
             // Ignore parsing errors for partial JSON chunks
           }
         }
+      }
+    }
+
+    // Update capture with real usage if available
+    if (isDebugCaptureEnabled() && capturedUsage) {
+      const captures = await import("@/lib/debug/prompt-capture").then(
+        (m) => m.getPromptCaptures()
+      );
+      const latest = captures[captures.length - 1];
+      if (latest && !latest.usage) {
+        latest.usage = capturedUsage;
       }
     }
   } catch (error) {

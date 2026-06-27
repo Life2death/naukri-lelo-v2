@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchAIResponse } from "@/lib/functions/ai-response.function";
+import { fetchAIResponse, buildEnhancedSystemPrompt } from "@/lib/functions/ai-response.function";
 import type { TYPE_PROVIDER } from "@/types";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -261,5 +261,64 @@ describe("fetchAIResponse", () => {
     const roles = body.messages.map((m: any) => m.role);
     expect(roles).toContain("user");
     expect(roles).toContain("assistant");
+  });
+});
+
+// ── buildEnhancedSystemPrompt tests (Part A) ───────────────────────────────
+
+describe("buildEnhancedSystemPrompt", () => {
+  it("returns { text, segments } with correct shape", () => {
+    const result = buildEnhancedSystemPrompt("You are a helpful assistant.");
+
+    expect(result).toHaveProperty("text");
+    expect(result).toHaveProperty("segments");
+    expect(Array.isArray(result.segments)).toBe(true);
+
+    expect(typeof result.text).toBe("string");
+    expect(result.text.length).toBeGreaterThan(0);
+
+    // Each segment has name and text
+    for (const seg of result.segments) {
+      expect(seg).toHaveProperty("name");
+      expect(seg).toHaveProperty("text");
+      expect(typeof seg.name).toBe("string");
+    }
+  });
+
+  it("includes baseSystemPrompt in the authoritative text", () => {
+    const basePrompt = "You are a helpful assistant.";
+    const result = buildEnhancedSystemPrompt(basePrompt);
+    expect(result.text).toContain(basePrompt);
+  });
+
+  it("prepends incoming segments as display-only metadata without modifying text", () => {
+    const incoming = [{ name: "profileContext", text: "Profile info here." }];
+    const basePrompt = "Base system prompt.";
+    const result = buildEnhancedSystemPrompt(basePrompt, incoming);
+
+    // Incoming segments appear first in the segments list (display-only)
+    expect(result.segments[0].name).toBe("profileContext");
+    expect(result.segments[0].text).toBe("Profile info here.");
+
+    // But text is built from baseSystemPrompt + appended rules only
+    // incoming segments' text is already embedded in baseSystemPrompt
+    expect(result.text).toContain(basePrompt);
+  });
+
+  it("returns segments even without a baseSystemPrompt", () => {
+    const result = buildEnhancedSystemPrompt();
+    expect(typeof result.text).toBe("string");
+    expect(Array.isArray(result.segments)).toBe(true);
+  });
+
+  it("text is byte-identical to the old string output for same inputs", () => {
+    // The authoritative text is: baseSystemPrompt + lengthRule + language + markdown
+    // With the mock data (lengthRule.prompt="", language.prompt="", MARKDOWN=""),
+    // the text equals baseSystemPrompt when present, or "" when not
+    const withBase = buildEnhancedSystemPrompt("Hello");
+    expect(withBase.text).toBe("Hello ");
+
+    const withoutBase = buildEnhancedSystemPrompt();
+    expect(withoutBase.text).toBe("");
   });
 });
