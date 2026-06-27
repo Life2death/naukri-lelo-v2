@@ -33,7 +33,9 @@ export const AI_PROVIDERS = [
   -H "content-type: application/json" \\
   -d '{
     "model": "{{MODEL}}",
-    "system": "{{SYSTEM_PROMPT}}",
+    "system": [
+      { "type": "text", "text": "{{SYSTEM_PROMPT}}", "cache_control": { "type": "ephemeral" } }
+    ],
     "messages": [{"role": "user", "content": [{"type": "text", "text": "{{TEXT}}"}, {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "{{IMAGE}}"}}]}],
     "max_tokens": 1024
   }'`,

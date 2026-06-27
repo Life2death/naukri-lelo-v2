@@ -271,8 +271,8 @@ export const useCompletion = () => {
         }));
 
         try {
-          // TODO: wire full-context toggle from settings — default false (brief mode)
-          const FULL_CONTEXT_MODE = false;
+          // For Anthropic-with-caching, default to full context mode (the brief is below the cache floor)
+          const FULL_CONTEXT_MODE = selectedAIProvider.provider === "claude";
           const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
           // Use the fetchAIResponse function with signal
           for await (const chunk of fetchAIResponse({
@@ -682,8 +682,8 @@ export const useCompletion = () => {
               response: "",
             }));
 
-            // TODO: wire full-context toggle from settings — default false (brief mode)
-            const FULL_CONTEXT_MODE = false;
+            // For Anthropic-with-caching, default to full context mode (the brief is below the cache floor)
+            const FULL_CONTEXT_MODE = selectedAIProvider.provider === "claude";
             const effectivePrompt = buildEffectiveSystemPrompt(FULL_CONTEXT_MODE);
             // Use the fetchAIResponse function with image and signal
             for await (const chunk of fetchAIResponse({
