@@ -3,7 +3,7 @@ import { useApp } from "@/contexts";
 import { useWindowResize, useOpenRouterModels } from "@/hooks";
 import { PROVIDER_MODEL_SUGGESTIONS } from "@/config";
 import { BrainIcon, CheckIcon, Loader2, SearchIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export const BrainSelector = () => {
   const {
@@ -14,6 +14,12 @@ export const BrainSelector = () => {
   } = useApp();
   const [open, setOpen] = useState(false);
   const [editingModel, setEditingModel] = useState(false);
+  // Local draft for the model field so active typing is never clobbered by
+  // background context refreshes (cross-window storage sync). Commits to
+  // global state on blur / Enter / chip-click only.
+  const [modelDraft, setModelDraft] = useState(
+    selectedAIProvider.variables?.model || ""
+  );
   const { resizeWindow } = useWindowResize();
 
   const {
@@ -45,11 +51,18 @@ export const BrainSelector = () => {
   };
 
   const handleModelChange = (model: string) => {
+    const savedVars = providerVariables[selectedAIProvider.provider] ?? {};
     onSetSelectedAIProvider({
       provider: selectedAIProvider.provider,
-      variables: { ...selectedAIProvider.variables, model },
+      variables: { ...savedVars, ...selectedAIProvider.variables, model },
     });
   };
+
+  // Mirror external model changes into the draft, but never overwrite the
+  // value while the user is actively editing the field.
+  useEffect(() => {
+    if (!editingModel) setModelDraft(currentModel);
+  }, [currentModel, editingModel]);
 
   const handleKeyChange = (key: string) => {
     onSetSelectedAIProvider({
@@ -196,6 +209,7 @@ export const BrainSelector = () => {
                               className="w-full text-left px-2 py-1.5 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
                               onClick={() => {
                                 handleModelChange(model.id);
+                                setModelDraft(model.id);
                                 closeModelPicker();
                               }}
                             >
@@ -218,7 +232,10 @@ export const BrainSelector = () => {
                   <>
                     {!editingModel && currentModel ? (
                       <button
-                        onClick={() => setEditingModel(true)}
+                        onClick={() => {
+                          setModelDraft(currentModel);
+                          setEditingModel(true);
+                        }}
                         className="w-full text-left text-xs bg-muted/30 rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors truncate"
                       >
                         {currentModel}
@@ -231,9 +248,20 @@ export const BrainSelector = () => {
                             ? `e.g. ${suggestions[0]}`
                             : "Enter model name..."
                         }
-                        value={currentModel}
-                        onChange={(e) => handleModelChange(e.target.value)}
-                        onBlur={() => setEditingModel(false)}
+                        value={modelDraft}
+                        onChange={(e) => setModelDraft(e.target.value)}
+                        onBlur={() => {
+                          setEditingModel(false);
+                          if (modelDraft.trim() !== currentModel) {
+                            handleModelChange(modelDraft.trim());
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleModelChange(modelDraft.trim());
+                            setEditingModel(false);
+                          }
+                        }}
                         className="w-full text-xs bg-muted/30 border rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/50"
                         autoFocus
                       />
@@ -243,7 +271,10 @@ export const BrainSelector = () => {
                         {suggestions.map((m) => (
                           <button
                             key={m}
-                            onClick={() => handleModelChange(m)}
+                            onClick={() => {
+                              handleModelChange(m);
+                              setModelDraft(m);
+                            }}
                             className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-colors ${
                               currentModel === m
                                 ? "bg-primary/10 border-primary/30 text-primary"
