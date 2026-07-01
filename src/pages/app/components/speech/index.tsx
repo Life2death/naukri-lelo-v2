@@ -14,6 +14,7 @@ import {
   CameraIcon,
   PlusIcon,
   XIcon,
+  RefreshCw,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ModeSwitcher } from "./ModeSwitcher";
@@ -26,6 +27,8 @@ import { Warning } from "./Warning";
 import { useSystemAudioType } from "@/hooks";
 import { useApp } from "@/contexts";
 import { cn } from "@/lib/utils";
+import { ResponseQuickSettings } from "../completion/ResponseQuickSettings";
+import { RESPONSE_LENGTHS } from "@/lib";
 
 export const SystemAudio = (props: useSystemAudioType) => {
   const {
@@ -55,6 +58,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
     showQuickActions,
     setShowQuickActions,
     handleQuickActionClick,
+    regenerate,
     vadConfig,
     updateVadConfiguration,
     isRecordingInContinuousMode,
@@ -223,6 +227,47 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {!setupRequired && (
+                    <>
+                      <ResponseQuickSettings />
+
+                      {/* Regenerate at length — ported from the typed-completion panel */}
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            disabled={isAIProcessing || !lastAIResponse}
+                            className="h-6 w-6 cursor-pointer"
+                            title="Regenerate this answer at a different length"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="end"
+                          side="bottom"
+                          className="w-44 p-1"
+                          sideOffset={4}
+                        >
+                          <p className="text-[11px] text-muted-foreground px-2 py-1 select-none">
+                            Regenerate at length
+                          </p>
+                          {RESPONSE_LENGTHS.map((length) => (
+                            <Button
+                              key={length.id}
+                              variant="ghost"
+                              className="w-full justify-start text-xs cursor-pointer"
+                              onClick={() => regenerate(length.id)}
+                            >
+                              {length.title}
+                            </Button>
+                          ))}
+                        </PopoverContent>
+                      </Popover>
+                    </>
+                  )}
+
                   {/* Screenshot Button */}
                   {!setupRequired && supportsImages && (
                     <Button

@@ -17,8 +17,13 @@ import {
   CONVERSATION_SAVE_DEBOUNCE_MS,
   generateConversationId,
   generateMessageId,
+  getProfileById,
+  buildProfileKnowledgeContext,
+  buildProfileBriefContext,
+  loadProfileRefConvTexts,
 } from "@/lib";
 import { Message } from "@/types/completion";
+import { InterviewProfile } from "@/types";
 
 // VAD Configuration interface matching Rust
 export interface VadConfig {
@@ -106,11 +111,65 @@ export function useSystemAudio() {
     providerVariables,
     systemPrompt,
     selectedAudioDevices,
+    activeProfileId,
   } = useApp();
   const abortControllerRef = useRef<AbortController | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Cache the active interview profile's knowledge context, same as useCompletion,
+  // so voice-driven answers get the resume/JD context too instead of a bare system prompt.
+  const activeProfileRef = useRef<InterviewProfile | null>(null);
+  const profileContextRef = useRef<string>("");
+  const profileBriefRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!activeProfileId) {
+      activeProfileRef.current = null;
+      profileContextRef.current = "";
+      profileBriefRef.current = "";
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getProfileById(activeProfileId);
+        if (cancelled || !profile) return;
+        activeProfileRef.current = profile;
+        const refTexts = await loadProfileRefConvTexts(activeProfileId);
+        if (cancelled) return;
+        profileContextRef.current = buildProfileKnowledgeContext(profile, refTexts);
+        profileBriefRef.current = buildProfileBriefContext(profile, refTexts);
+      } catch {
+        activeProfileRef.current = null;
+        profileContextRef.current = "";
+        profileBriefRef.current = "";
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProfileId]);
+
+  /** Prepends the active profile's knowledge context (brief, falling back to full) to the base system/context prompt. */
+  const buildEffectiveSystemPrompt = useCallback((): {
+    text: string;
+    segments: { name: string; text: string }[];
+  } => {
+    const base = useSystemPrompt
+      ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+      : contextContent || DEFAULT_SYSTEM_PROMPT;
+    const profileCtx = profileBriefRef.current || profileContextRef.current;
+    if (!profileCtx) {
+      return { text: base, segments: [{ name: "base", text: base }] };
+    }
+    return {
+      text: `${profileCtx}\n\n---\n\n${base}`,
+      segments: [
+        { name: "profileContext", text: profileCtx },
+        { name: "base", text: base },
+      ],
+    };
+  }, [useSystemPrompt, systemPrompt, contextContent]);
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -276,9 +335,7 @@ export function useSystemAudio() {
                 setLastTranscription(transcription);
                 setError("");
 
-                const effectiveSystemPrompt = useSystemPrompt
-                  ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                  : contextContent || DEFAULT_SYSTEM_PROMPT;
+                const effectivePrompt = buildEffectiveSystemPrompt();
 
                 const previousMessages = conversation.messages.map((msg) => {
                   return { role: msg.role, content: msg.content };
@@ -286,8 +343,9 @@ export function useSystemAudio() {
 
                 await processWithAI(
                   transcription,
-                  effectiveSystemPrompt,
-                  previousMessages
+                  effectivePrompt.text,
+                  previousMessages,
+                  effectivePrompt.segments
                 );
               } else {
                 setError("Received empty transcription");
@@ -390,9 +448,7 @@ export function useSystemAudio() {
   const handleQuickActionClick = async (action: string) => {
     setError("");
 
-    const effectiveSystemPrompt = useSystemPrompt
-      ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-      : contextContent || DEFAULT_SYSTEM_PROMPT;
+    const effectivePrompt = buildEffectiveSystemPrompt();
 
     // Include the most recent transcription in conversation history if it exists
     let updatedMessages = [...conversation.messages];
@@ -424,8 +480,109 @@ export function useSystemAudio() {
       return { role: msg.role, content: msg.content };
     });
 
-    await processWithAI(action, effectiveSystemPrompt, previousMessages);
+    await processWithAI(action, effectivePrompt.text, previousMessages, effectivePrompt.segments);
   };
+
+  /** Regenerates the most recent AI response at a different response length (Phase F, ported from useCompletion). */
+  const regenerate = useCallback(
+    async (lengthId: string) => {
+      if (!lastTranscription || !lastAIResponse) return;
+      if (isAIProcessing) return;
+
+      if (!selectedAIProvider.provider) {
+        setError("No AI provider selected.");
+        return;
+      }
+      const provider = allAiProviders.find(
+        (p) => p.id === selectedAIProvider.provider
+      );
+      if (!provider) {
+        setError("AI provider config not found.");
+        return;
+      }
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
+      const prevResponse = lastAIResponse;
+      setIsAIProcessing(true);
+      setError("");
+      setLastAIResponse("");
+
+      try {
+        const effectivePrompt = buildEffectiveSystemPrompt();
+        const failoverEnabled = getFailoverEnabled();
+        const failoverChain = failoverEnabled
+          ? [
+              { provider, variables: providerVariables[provider.id || ""] || {} },
+              ...getFailoverChain()
+                .filter((id) => id !== selectedAIProvider.provider)
+                .map((id) => allAiProviders.find((p) => p.id === id))
+                .filter((p): p is NonNullable<typeof p> => p != null)
+                .map((p) => ({ provider: p, variables: providerVariables[p.id || ""] || {} })),
+            ]
+          : undefined;
+
+        // conversation.messages is newest-first (prepended); the most recent
+        // turn is [user, assistant, ...older] — drop it so the model doesn't see the question twice.
+        const history = conversation.messages
+          .slice(2)
+          .map((msg) => ({ role: msg.role, content: msg.content }));
+
+        let fullResponse = "";
+        for await (const chunk of fetchAIResponseWithFailover({
+          provider,
+          selectedProvider: selectedAIProvider,
+          failoverChain,
+          systemPrompt: effectivePrompt.text,
+          segments: effectivePrompt.segments,
+          history,
+          userMessage: lastTranscription,
+          imagesBase64: [],
+          signal,
+          _source: "audio",
+          responseLengthOverride: lengthId,
+        })) {
+          if (signal.aborted) return;
+          fullResponse += chunk;
+          setLastAIResponse((prev) => prev + chunk);
+        }
+
+        if (signal.aborted) return;
+
+        if (fullResponse) {
+          setConversation((prev) => {
+            const messages = [...prev.messages];
+            const idx = messages.findIndex((m) => m.role === "assistant");
+            if (idx !== -1) {
+              messages[idx] = { ...messages[idx], content: fullResponse, timestamp: Date.now() };
+            }
+            return { ...prev, messages, updatedAt: Date.now() };
+          });
+        }
+      } catch (aiError: any) {
+        if (!signal.aborted) {
+          setError(aiError.message || "Regeneration failed");
+          setLastAIResponse(prevResponse);
+        }
+      } finally {
+        setIsAIProcessing(false);
+      }
+    },
+    [
+      lastTranscription,
+      lastAIResponse,
+      isAIProcessing,
+      selectedAIProvider,
+      allAiProviders,
+      providerVariables,
+      conversation.messages,
+      buildEffectiveSystemPrompt,
+    ]
+  );
 
   // Start continuous recording manually
   const startContinuousRecording = useCallback(async () => {
@@ -472,7 +629,8 @@ export function useSystemAudio() {
     async (
       transcription: string,
       prompt: string,
-      previousMessages: Message[]
+      previousMessages: Message[],
+      segments?: { name: string; text: string }[]
     ) => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -517,9 +675,11 @@ export function useSystemAudio() {
             selectedProvider: selectedAIProvider,
             failoverChain: failoverChain,
             systemPrompt: prompt,
+            segments,
             history: previousMessages,
             userMessage: transcription,
             imagesBase64: [],
+            _source: "audio",
           })) {
             fullResponse += chunk;
             setLastAIResponse((prev) => prev + chunk);
@@ -923,6 +1083,7 @@ export function useSystemAudio() {
     showQuickActions,
     setShowQuickActions,
     handleQuickActionClick,
+    regenerate,
     // VAD configuration
     vadConfig,
     updateVadConfiguration,
