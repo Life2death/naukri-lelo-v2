@@ -26,6 +26,12 @@ pub struct AudioState {
     is_capturing: Arc<Mutex<bool>>,
 }
 
+#[derive(Default)]
+pub struct InterviewState {
+    pub stream_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    pub is_capturing: Arc<Mutex<bool>>,
+}
+
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -73,6 +79,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AudioState::default())
+        .manage(InterviewState::default())
         .manage(CaptureState::default())
         .manage(shortcuts::WindowVisibility {
             is_hidden: Mutex::new(false),
@@ -125,6 +132,9 @@ pub fn run() {
             speaker::update_vad_config,
             speaker::get_input_devices,
             speaker::get_output_devices,
+            speaker::start_interview_capture,
+            speaker::stop_interview_capture,
+            speaker::flush_interview_chunk,
         ])
         .setup(|app| {
             // Non-fatal: if window positioning fails, continue anyway

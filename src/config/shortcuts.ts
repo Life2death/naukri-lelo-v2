@@ -71,4 +71,14 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
       linux: "ctrl+shift+s",
     },
   },
+  {
+    id: "interview_fire",
+    name: "Interview Mode - Answer Now",
+    description: "Fire the current transcript buffer to the AI for an answer",
+    defaultKey: {
+      macos: "cmd+shift+enter",
+      windows: "ctrl+shift+enter",
+      linux: "ctrl+shift+enter",
+    },
+  },
 ];
