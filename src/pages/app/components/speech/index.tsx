@@ -15,9 +15,11 @@ import {
   PlusIcon,
   XIcon,
   RefreshCw,
+  SendHorizonalIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { ModeSwitcher } from "./ModeSwitcher";
+import { ModeSwitcher, CaptureMode } from "./ModeSwitcher";
 import { RecordingPanel } from "./RecordingPanel";
 import { ResultsSection } from "./ResultsSection";
 import { SettingsPanel } from "./SettingsPanel";
@@ -67,6 +69,17 @@ export const SystemAudio = (props: useSystemAudioType) => {
     startContinuousRecording,
     ignoreContinuousRecording,
     scrollAreaRef,
+    // Interview mode
+    captureMode,
+    setCaptureMode,
+    interviewBufferText,
+    interviewCapturing,
+    isFireProcessing,
+    sttQueueWarning,
+    fireInterviewBuffer,
+    clearInterviewBuffer,
+    useCopilotPrompt,
+    setUseCopilotPrompt,
   } = props;
 
   const { supportsImages } = useApp();
@@ -78,8 +91,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
-  const isVadMode = vadConfig.enabled;
+  const isVadMode = captureMode === "vad";
+  const isInterviewMode = captureMode === "interview";
   const hasResponse = lastAIResponse || isAIProcessing;
+  const showPopover = capturing || setupRequired || error || interviewCapturing || isInterviewMode;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const modKey = isMac ? "⌘" : "Ctrl";
 
   // Keyboard shortcut for Cmd+K to toggle view mode
   useEffect(() => {
@@ -91,11 +109,17 @@ export const SystemAudio = (props: useSystemAudioType) => {
         e.preventDefault();
         setConversationMode((prev) => !prev);
       }
+
+      // Enter to fire in interview mode (when panel is focused)
+      if (isInterviewMode && e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        fireInterviewBuffer();
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPopoverOpen]);
+  }, [isPopoverOpen, isInterviewMode, fireInterviewBuffer]);
 
   // Reset screenshot when processing starts (message is being sent)
   useEffect(() => {
@@ -105,18 +129,18 @@ export const SystemAudio = (props: useSystemAudioType) => {
   }, [isProcessing, screenshotImage]);
 
   const handleToggleCapture = async () => {
-    if (capturing) {
+    if (capturing || interviewCapturing) {
       await stopCapture();
     } else {
       await startCapture();
     }
   };
 
-  const handleModeChange = (vadEnabled: boolean) => {
-    updateVadConfiguration({
-      ...vadConfig,
-      enabled: vadEnabled,
-    });
+  const handleModeChange = (mode: CaptureMode) => {
+    if (capturing || interviewCapturing) {
+      return; // Don't switch modes while capturing
+    }
+    setCaptureMode(mode);
   };
 
   // Capture screenshot functionality
@@ -125,7 +149,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
     setIsCapturingScreenshot(true);
     try {
-      // Check screen recording permission on macOS
       const platform = navigator.platform.toLowerCase();
       if (platform.includes("mac")) {
         const {
@@ -141,7 +164,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
         }
       }
 
-      // Capture screenshot
       const base64: string = await invoke("capture_to_base64");
 
       setScreenshotImage(base64);
@@ -161,7 +183,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
     if (error && !setupRequired)
       return <AlertCircleIcon className="text-red-500" />;
     if (isProcessing) return <LoaderIcon className="animate-spin" />;
-    if (capturing)
+    if (capturing || interviewCapturing)
       return <AudioLinesIcon className="text-green-500 animate-pulse" />;
     return <HeadphonesIcon />;
   };
@@ -170,15 +192,22 @@ export const SystemAudio = (props: useSystemAudioType) => {
     if (setupRequired) return "Setup required - Click for instructions";
     if (error && !setupRequired) return `Error: ${error}`;
     if (isProcessing) return "Transcribing audio...";
-    if (capturing) return "Stop system audio capture";
+    if (capturing || interviewCapturing) return "Stop system audio capture";
     return "Start system audio capture";
+  };
+
+  const getButtonClass = () => {
+    if (setupRequired) return "";
+    if (error && !setupRequired) return "bg-red-100 hover:bg-red-200";
+    if (capturing || interviewCapturing) return "bg-green-50 hover:bg-green-100";
+    return "";
   };
 
   return (
     <Popover
       open={isPopoverOpen}
       onOpenChange={(open) => {
-        if (capturing && !open) {
+        if ((capturing || interviewCapturing) && !open) {
           return;
         }
         setIsPopoverOpen(open);
@@ -189,16 +218,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
           size="icon"
           title={getButtonTitle()}
           onClick={handleToggleCapture}
-          className={cn(
-            capturing && "bg-green-50 hover:bg-green-100",
-            error && "bg-red-100 hover:bg-red-200"
-          )}
+          className={cn(getButtonClass())}
         >
           {getButtonIcon()}
         </Button>
       </PopoverTrigger>
 
-      {(capturing || setupRequired || error) && (
+      {(showPopover) && (
         <PopoverContent
           align="end"
           side="bottom"
@@ -212,12 +238,15 @@ export const SystemAudio = (props: useSystemAudioType) => {
                 {/* Mode Switcher */}
                 {!setupRequired && (
                   <ModeSwitcher
-                    isVadMode={isVadMode}
+                    captureMode={captureMode}
                     onModeChange={handleModeChange}
                     disabled={
+                      capturing ||
+                      interviewCapturing ||
                       isRecordingInContinuousMode ||
                       isProcessing ||
-                      isAIProcessing
+                      isAIProcessing ||
+                      isFireProcessing
                     }
                   />
                 )}
@@ -227,11 +256,11 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {!setupRequired && (
+                  {!setupRequired && !isInterviewMode && (
                     <>
                       <ResponseQuickSettings />
 
-                      {/* Regenerate at length — ported from the typed-completion panel */}
+                      {/* Regenerate at length */}
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -305,7 +334,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                   )}
 
                   {/* Close Button */}
-                  {!capturing && (
+                  {!capturing && !interviewCapturing && (
                     <Button
                       size="icon"
                       variant="ghost"
@@ -375,7 +404,135 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       // Keep showing setup instructions
                     }}
                   />
+                ) : isInterviewMode ? (
+                  /* ──── INTERVIEW MODE UI ──── */
+                  <div className="space-y-2">
+                    {/* Live Transcript Strip */}
+                    <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          {interviewCapturing ? (
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                          ) : (
+                            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+                          )}
+                          <span className="text-xs font-medium">
+                            Live Transcript
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] text-muted-foreground">
+                            {interviewBufferText
+                              ? `${interviewBufferText.split(/\s+/).length} words`
+                              : "listening..."}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="min-h-[3rem] max-h-[6rem] overflow-y-auto text-[11px] text-muted-foreground leading-relaxed bg-background/50 rounded p-2">
+                        {interviewBufferText ? (
+                          <p>{interviewBufferText}</p>
+                        ) : (
+                          <p className="italic opacity-50">
+                            {interviewCapturing
+                              ? "Waiting for speech..."
+                              : "Start capture to begin"}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* STT Queue Health Warning */}
+                    {sttQueueWarning && (
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10px] text-amber-800">
+                        <AlertCircleIcon className="w-3 h-3 flex-shrink-0" />
+                        <span>{sttQueueWarning}</span>
+                      </div>
+                    )}
+
+                    {/* Interview Controls */}
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={fireInterviewBuffer}
+                        disabled={
+                          !interviewCapturing ||
+                          isFireProcessing ||
+                          isAIProcessing ||
+                          !interviewBufferText.trim()
+                        }
+                        size="sm"
+                        className="flex-1 gap-1.5"
+                      >
+                        {isFireProcessing ? (
+                          <LoaderIcon className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <SendHorizonalIcon className="w-3.5 h-3.5" />
+                        )}
+                        Answer now
+                      </Button>
+                      <Button
+                        onClick={clearInterviewBuffer}
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={
+                          !interviewBufferText.trim()
+                        }
+                      >
+                        <Trash2Icon className="w-3 h-3" />
+                        Clear
+                      </Button>
+                    </div>
+
+                    {/* Hotkey hint */}
+                    <div className="flex justify-center gap-3 text-[8px] text-muted-foreground/60">
+                      <span>
+                        <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
+                          {modKey}+Shift+Enter
+                        </kbd>{" "}
+                        global fire
+                      </span>
+                      <span>
+                        <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
+                          Enter
+                        </kbd>{" "}
+                        fire (focused)
+                      </span>
+                      {interviewCapturing && (
+                        <span>
+                          <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
+                            Esc
+                          </kbd>{" "}
+                          stop
+                        </span>
+                      )}
+                    </div>
+
+                    {/* AI Response */}
+                    <ResultsSection
+                      lastTranscription={lastTranscription}
+                      lastAIResponse={lastAIResponse}
+                      isAIProcessing={isAIProcessing}
+                      conversation={conversation}
+                      conversationMode={conversationMode}
+                      setConversationMode={setConversationMode}
+                    />
+
+                    {/* Settings Panel - with interview-specific toggle */}
+                    <SettingsPanel
+                      vadConfig={vadConfig}
+                      onUpdateVadConfig={updateVadConfiguration}
+                      useSystemPrompt={useCopilotPrompt}
+                      setUseSystemPrompt={setUseCopilotPrompt}
+                      contextContent={contextContent}
+                      setContextContent={setContextContent}
+                      interviewMode={true}
+                    />
+
+                    <Warning isVadMode={false} />
+                  </div>
                 ) : (
+                  /* ──── VAD / MANUAL MODE UI (UNCHANGED) ──── */
                   <>
                     {/* Recording Panel */}
                     <RecordingPanel

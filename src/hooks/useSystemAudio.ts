@@ -9,6 +9,7 @@ import {
   DEFAULT_QUICK_ACTIONS,
   DEFAULT_SYSTEM_PROMPT,
   STORAGE_KEYS,
+  INTERVIEW_COPILOT_PROMPT,
 } from "@/config";
 import {
   safeLocalStorage,
@@ -24,6 +25,7 @@ import {
 } from "@/lib";
 import { Message } from "@/types/completion";
 import { InterviewProfile } from "@/types";
+import { CaptureMode } from "@/pages/app/components/speech/ModeSwitcher";
 
 // VAD Configuration interface matching Rust
 export interface VadConfig {
@@ -36,6 +38,11 @@ export interface VadConfig {
   pre_speech_chunks: number;
   noise_gate_threshold: number;
   max_recording_duration_secs: number;
+}
+
+export interface InterviewChunk {
+  seq: number;
+  text: string;
 }
 
 // OPTIMIZED VAD defaults - matches backend exactly for perfect performance
@@ -90,6 +97,24 @@ export function useSystemAudio() {
   const [isContinuousMode, setIsContinuousMode] = useState<boolean>(false);
   const [isRecordingInContinuousMode, setIsRecordingInContinuousMode] =
     useState<boolean>(false);
+
+  // Capture mode: "vad" | "manual" | "interview"
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(() => {
+    const stored = safeLocalStorage.getItem(STORAGE_KEYS.CAPTURE_MODE);
+    if (stored === "vad" || stored === "manual" || stored === "interview") {
+      return stored;
+    }
+    return vadConfig.enabled ? "vad" : "manual";
+  });
+
+  // Interview mode state
+  const [interviewChunks, setInterviewChunks] = useState<InterviewChunk[]>([]);
+  const [interviewBufferText, setInterviewBufferText] = useState<string>("");
+  const [isFireProcessing, setIsFireProcessing] = useState(false);
+  const [sttQueueWarning, setSttQueueWarning] = useState<string>("");
+  const [interviewCapturing, setInterviewCapturing] = useState(false);
+  // Whether the interview mode is using the co-pilot prompt vs system prompt
+  const [useCopilotPrompt, setUseCopilotPrompt] = useState<boolean>(true);
 
   const [conversation, setConversation] = useState<ChatConversation>({
     id: "",
@@ -155,9 +180,16 @@ export function useSystemAudio() {
     text: string;
     segments: { name: string; text: string }[];
   } => {
-    const base = useSystemPrompt
-      ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-      : contextContent || DEFAULT_SYSTEM_PROMPT;
+    const isInterviewMode = captureMode === "interview";
+    const base = isInterviewMode
+      ? useCopilotPrompt
+        ? INTERVIEW_COPILOT_PROMPT
+        : useSystemPrompt
+          ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+          : contextContent || DEFAULT_SYSTEM_PROMPT
+      : useSystemPrompt
+        ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+        : contextContent || DEFAULT_SYSTEM_PROMPT;
     const profileCtx = profileBriefRef.current || profileContextRef.current;
     if (!profileCtx) {
       return { text: base, segments: [{ name: "base", text: base }] };
@@ -169,7 +201,7 @@ export function useSystemAudio() {
         { name: "base", text: base },
       ],
     };
-  }, [useSystemPrompt, systemPrompt, contextContent]);
+  }, [useSystemPrompt, systemPrompt, contextContent, captureMode, useCopilotPrompt]);
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -215,6 +247,147 @@ export function useSystemAudio() {
       setQuickActions(DEFAULT_QUICK_ACTIONS);
     }
   }, []);
+
+  // Persist captureMode changes
+  const handleCaptureModeChange = useCallback((mode: CaptureMode) => {
+    setCaptureMode(mode);
+    safeLocalStorage.setItem(STORAGE_KEYS.CAPTURE_MODE, mode);
+  }, []);
+
+  // Interview mode: listen for audio chunk events and process them
+  useEffect(() => {
+    if (captureMode !== "interview") return;
+
+    let unlistenChunk: (() => void) | undefined;
+    let unlistenError: (() => void) | undefined;
+    let unlistenStopped: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      try {
+        unlistenChunk = await listen("interview-audio-chunk", (event) => {
+          const payload = event.payload as { seq: number; base64: string };
+          if (!payload?.base64) return;
+
+          // Process chunk through STT
+          processChunk(payload.seq, payload.base64);
+        });
+
+        unlistenError = await listen("interview-capture-error", (event) => {
+          const msg = event.payload as string;
+          setError(`Interview capture error: ${msg}`);
+        });
+
+        unlistenStopped = await listen("interview-capture-stopped", () => {
+          setInterviewCapturing(false);
+        });
+      } catch (err) {
+        console.error("Failed to setup interview listeners:", err);
+      }
+    };
+
+    let processingCount = 0;
+    const processingQueue: { seq: number; base64: string }[] = [];
+    let isProcessing = false;
+
+    const processChunk = (seq: number, base64: string) => {
+      processingQueue.push({ seq, base64 });
+      processQueue();
+    };
+
+    const processQueue = async () => {
+      if (isProcessing || processingQueue.length === 0) return;
+      isProcessing = true;
+
+      while (processingQueue.length > 0) {
+        const item = processingQueue.shift()!;
+        processingCount++;
+        if (processingCount > 3) {
+          setSttQueueWarning("STT queue depth > 3 — transcription may be behind");
+        }
+
+        try {
+          const binaryString = atob(item.base64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const audioBlob = new Blob([bytes], { type: "audio/wav" });
+
+          if (!selectedSttProvider.provider) {
+            setSttQueueWarning("No STT provider configured");
+            return;
+          }
+
+          const providerConfig = allSttProviders.find(
+            (p) => p.id === selectedSttProvider.provider
+          );
+          if (!providerConfig) {
+            setSttQueueWarning("STT provider config not found");
+            setInterviewChunks((prev) => [
+              ...prev,
+              { seq: item.seq, text: "[unclear]" },
+            ]);
+            continue;
+          }
+
+          let transcription: string;
+          try {
+            transcription = await fetchSTT({
+              provider: providerConfig,
+              selectedProvider: selectedSttProvider,
+              audio: audioBlob,
+            });
+          } catch {
+            setInterviewChunks((prev) => [
+              ...prev,
+              { seq: item.seq, text: "[unclear]" },
+            ]);
+            continue;
+          }
+
+          // Filter junk transcripts
+          const trimmed = transcription.trim().toLowerCase();
+          if (
+            !trimmed ||
+            trimmed === "thank you." ||
+            trimmed === "thanks for watching!" ||
+            trimmed === "you" ||
+            trimmed === "."
+          ) {
+            continue;
+          }
+
+          setInterviewChunks((prev) => {
+            const updated = [...prev, { seq: item.seq, text: transcription.trim() }];
+            // Update buffer text: ordered concatenation
+            const ordered = updated.sort((a, b) => a.seq - b.seq);
+            setInterviewBufferText(ordered.map((c) => c.text).join(" "));
+            return updated;
+          });
+
+          processingCount = Math.max(0, processingCount - 1);
+          if (processingCount <= 2) {
+            setSttQueueWarning("");
+          }
+        } catch {
+          setInterviewChunks((prev) => [
+            ...prev,
+            { seq: item.seq, text: "[unclear]" },
+          ]);
+        }
+      }
+
+      isProcessing = false;
+    };
+
+    setupListeners();
+
+    return () => {
+      if (unlistenChunk) unlistenChunk();
+      if (unlistenError) unlistenError();
+      if (unlistenStopped) unlistenStopped();
+    };
+  }, [captureMode, selectedSttProvider, allSttProviders]);
 
   // Handle continuous recording progress events AND error events
   useEffect(() => {
@@ -721,9 +894,110 @@ export function useSystemAudio() {
     [selectedAIProvider, allAiProviders, conversation.messages]
   );
 
+  /** Fire the interview transcript buffer: flush chunk, assemble, call AI. */
+  const fireInterviewBuffer = useCallback(async () => {
+    if (captureMode !== "interview") return;
+    if (isFireProcessing || isAIProcessing) return;
+
+    // Check if there's anything in the buffer
+    if (!interviewBufferText.trim()) {
+      setError("Nothing captured yet");
+      return;
+    }
+
+    setIsFireProcessing(true);
+    setError("");
+
+    try {
+      // Step 1: flush the current partial chunk from Rust
+      try {
+        await invoke("flush_interview_chunk");
+      } catch {
+        // Non-fatal — continue with what we have
+      }
+
+      // Step 2: wait briefly for the flush chunk's transcription to arrive
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // Step 3: gather latest buffer text
+      const questionText = interviewBufferText.trim();
+      if (!questionText) {
+        setError("Nothing captured yet");
+        setIsFireProcessing(false);
+        return;
+      }
+
+      // Step 4: clear the buffer immediately
+      setInterviewChunks([]);
+      setInterviewBufferText("");
+
+      // Step 5: set lastTranscription (keeps regenerate() working)
+      setLastTranscription(questionText);
+
+      // Step 6: call AI
+      const effectivePrompt = buildEffectiveSystemPrompt();
+      const previousMessages = conversation.messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      await processWithAI(
+        questionText,
+        effectivePrompt.text,
+        previousMessages,
+        effectivePrompt.segments
+      );
+    } catch (err: any) {
+      setError(err.message || "Failed to fire interview answer");
+    } finally {
+      setIsFireProcessing(false);
+    }
+  }, [
+    captureMode,
+    interviewBufferText,
+    isFireProcessing,
+    isAIProcessing,
+    buildEffectiveSystemPrompt,
+    conversation.messages,
+    processWithAI,
+  ]);
+
+  /** Clear the interview transcript buffer without firing. */
+  const clearInterviewBuffer = useCallback(() => {
+    setInterviewChunks([]);
+    setInterviewBufferText("");
+    setSttQueueWarning("");
+  }, []);
+
   const startCapture = useCallback(async () => {
     try {
       setError("");
+
+      if (captureMode === "interview") {
+        // Start interview capture
+        const hasAccess = await invoke<boolean>("check_system_audio_access");
+        if (!hasAccess) {
+          setSetupRequired(true);
+          setIsPopoverOpen(true);
+          return;
+        }
+
+        const deviceId =
+          selectedAudioDevices.output.id !== "default"
+            ? selectedAudioDevices.output.id
+            : null;
+
+        setInterviewChunks([]);
+        setInterviewBufferText("");
+        setSttQueueWarning("");
+        setInterviewCapturing(true);
+        setIsPopoverOpen(true);
+
+        await invoke<string>("start_interview_capture", {
+          deviceId: deviceId,
+        });
+        return;
+      }
 
       const hasAccess = await invoke<boolean>("check_system_audio_access");
       if (!hasAccess) {
@@ -784,10 +1058,23 @@ export function useSystemAudio() {
         abortControllerRef.current = null;
       }
 
-      // Stop the audio capture
-      await invoke<string>("stop_system_audio_capture");
+      if (captureMode === "interview") {
+        // Stop interview capture
+        try {
+          await invoke<string>("stop_interview_capture");
+        } catch {
+          // ignore if not running
+        }
+        setInterviewCapturing(false);
+        setInterviewChunks([]);
+        setInterviewBufferText("");
+        setSttQueueWarning("");
+      } else {
+        // Stop the audio capture
+        await invoke<string>("stop_system_audio_capture");
+      }
 
-      // Reset ALL states
+      // Reset states
       setCapturing(false);
       setIsProcessing(false);
       setIsAIProcessing(false);
@@ -803,7 +1090,7 @@ export function useSystemAudio() {
       setError(`Failed to stop capture: ${errorMessage}`);
       console.error("Stop capture error:", err);
     }
-  }, []);
+  }, [captureMode]);
 
   // Manual stop for continuous recording
   const manualStopAndSend = useCallback(async () => {
@@ -854,10 +1141,13 @@ export function useSystemAudio() {
   useEffect(() => {
     const shouldOpenPopover =
       capturing ||
+      interviewCapturing ||
       setupRequired ||
       isAIProcessing ||
+      isFireProcessing ||
       !!lastAIResponse ||
-      !!error;
+      !!error ||
+      (captureMode === "interview" && !!interviewBufferText);
     setIsPopoverOpen(shouldOpenPopover);
     resizeWindow(shouldOpenPopover);
   }, [
@@ -879,12 +1169,24 @@ export function useSystemAudio() {
     });
   }, [startCapture, stopCapture]);
 
+  // Register interview_fire custom shortcut
+  useEffect(() => {
+    if (captureMode !== "interview") return;
+    globalShortcuts.registerCustomShortcutCallback("interview_fire", () => {
+      fireInterviewBuffer();
+    });
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback("interview_fire");
+    };
+  }, [captureMode, fireInterviewBuffer, globalShortcuts]);
+
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
       invoke("stop_system_audio_capture").catch(() => {});
+      invoke("stop_interview_capture").catch(() => {});
     };
   }, []);
 
@@ -1096,5 +1398,17 @@ export function useSystemAudio() {
     ignoreContinuousRecording,
     // Scroll area ref for keyboard navigation
     scrollAreaRef,
+    // Interview mode
+    captureMode,
+    setCaptureMode: handleCaptureModeChange,
+    interviewChunks,
+    interviewBufferText,
+    interviewCapturing,
+    isFireProcessing,
+    sttQueueWarning,
+    fireInterviewBuffer,
+    clearInterviewBuffer,
+    useCopilotPrompt,
+    setUseCopilotPrompt,
   };
 }

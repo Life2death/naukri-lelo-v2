@@ -5,6 +5,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use futures_util::StreamExt;
 use hound::{WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -588,6 +589,213 @@ pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
         error!("Failed to get output devices: {}", e);
         format!("Failed to get output devices: {}", e)
     })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interview mode — chunked continuous capture (Work Item A)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHUNK_MS: u64 = 4000;
+
+/// Start continuous loopback capture for interview mode. No VAD gating — captures
+/// everything. Chunks of ~4s are emitted as `interview-audio-chunk` events.
+#[tauri::command]
+pub async fn start_interview_capture(
+    app: AppHandle,
+    device_id: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<crate::InterviewState>();
+
+    {
+        let guard = state
+            .stream_task
+            .lock()
+            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+        if guard.is_some() {
+            return Err("Interview capture already running".to_string());
+        }
+    }
+
+    let input = SpeakerInput::new_with_device(device_id).map_err(|e| {
+        error!("Failed to create speaker input: {}", e);
+        format!("Failed to access system audio: {}", e)
+    })?;
+
+    let stream = input.stream();
+    let sr = stream.sample_rate();
+
+    if !(8000..=96000).contains(&sr) {
+        return Err(format!("Invalid sample rate: {}. Expected 8000-96000 Hz", sr));
+    }
+
+    *state
+        .is_capturing
+        .lock()
+        .map_err(|e| format!("Failed to set capturing state: {}", e))? = true;
+
+    let app_clone = app.clone();
+
+    let task = tokio::spawn(async move {
+        run_interview_capture(app_clone.clone(), stream, sr).await;
+
+        if let Ok(mut guard) = app_clone.state::<crate::InterviewState>().stream_task.lock() {
+            *guard = None;
+        }
+    });
+
+    *state
+        .stream_task
+        .lock()
+        .map_err(|e| format!("Failed to store task: {}", e))? = Some(task);
+
+    Ok(())
+}
+
+/// Stop interview capture and discard any partial chunk.
+#[tauri::command]
+pub async fn stop_interview_capture(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<crate::InterviewState>();
+
+    {
+        let mut guard = state
+            .stream_task
+            .lock()
+            .map_err(|e| format!("Failed to acquire task lock: {}", e))?;
+        if let Some(task) = guard.take() {
+            task.abort();
+        }
+    }
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    *state
+        .is_capturing
+        .lock()
+        .map_err(|e| format!("Failed to update capturing state: {}", e))? = false;
+
+    let _ = app.emit("interview-capture-stopped", ());
+    Ok(())
+}
+
+/// Emit the current partial chunk immediately (at fire time) and reset the accumulator.
+#[tauri::command]
+pub async fn flush_interview_chunk(app: AppHandle) -> Result<(), String> {
+    let _ = app.emit("interview-flush-chunk", ());
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    Ok(())
+}
+
+/// Chunked interview capture loop. Accumulates PCM continuously, emits a ~4s
+/// chunk every CHUNK_MS via `interview-audio-chunk` event. Silent chunks (below
+/// noise_gate_threshold RMS) are skipped.
+async fn run_interview_capture(
+    app: AppHandle,
+    stream: impl StreamExt<Item = f32> + Unpin,
+    sr: u32,
+) {
+    let mut stream = stream;
+    let chunk_samples = (sr as u64 * CHUNK_MS / 1000) as usize;
+    let mut accumulator: Vec<f32> = Vec::with_capacity(chunk_samples);
+    let mut seq: u64 = 0;
+    let start = Instant::now();
+
+    // Noise gate threshold — reuse the VAD default value
+    let noise_gate_threshold: f32 = 0.003;
+
+    // Listen for flush event
+    let flush_flag = Arc::new(AtomicBool::new(false));
+    let flush_flag_listener = flush_flag.clone();
+    let _flush_listener = app.listen("interview-flush-chunk", move |_| {
+        flush_flag_listener.store(true, Ordering::Release);
+    });
+
+    loop {
+        tokio::select! {
+            sample_opt = stream.next() => {
+                match sample_opt {
+                    Some(sample) => {
+                        accumulator.push(sample);
+
+                        let elapsed = start.elapsed();
+                        let flush_requested = flush_flag.swap(false, Ordering::Acquire);
+
+                        // Emit chunk every CHUNK_MS or on flush
+                        let time_for_chunk = elapsed.as_millis() as u64 % CHUNK_MS == 0
+                            && !accumulator.is_empty()
+                            && elapsed.as_millis() > 0;
+                        let should_emit = time_for_chunk || flush_requested;
+
+                        // Also keep a minimum chunk size (avoid tiny flushes of < ~200ms)
+                        let min_samples = (sr as usize) * 200 / 1000;
+                        let big_enough = accumulator.len() >= min_samples;
+
+                        if should_emit && !accumulator.is_empty() && big_enough {
+                            // Compute RMS
+                            let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
+                            let rms = (sum_sq / accumulator.len() as f32).sqrt();
+
+                            if rms > noise_gate_threshold {
+                                let normalized = normalize_audio_level(&accumulator, 0.1);
+                                if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
+                                    let _ = app.emit("interview-audio-chunk", serde_json::json!({
+                                        "seq": seq,
+                                        "base64": b64
+                                    }));
+                                }
+                            }
+                            // Still increment seq even for silent chunks (gap detection)
+                            seq += 1;
+                            accumulator.clear();
+                        } else if should_emit && !big_enough {
+                            // Chunk too small — skip emit but still increment seq
+                            // so the frontend can detect gaps
+                            seq += 1;
+                            accumulator.clear();
+                        }
+                    }
+                    None => {
+                        warn!("Interview audio stream ended unexpectedly");
+                        // Emit remaining partial chunk
+                        if !accumulator.is_empty() {
+                            let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
+                            let rms = (sum_sq / accumulator.len() as f32).sqrt();
+                            if rms > noise_gate_threshold {
+                                let normalized = normalize_audio_level(&accumulator, 0.1);
+                                if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
+                                    let _ = app.emit("interview-audio-chunk", serde_json::json!({
+                                        "seq": seq,
+                                        "base64": b64
+                                    }));
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
+                // Time-based chunk emission: check every 10ms whether enough time has passed
+                let elapsed = start.elapsed();
+                let elapsed_ms = elapsed.as_millis() as u64;
+                let chunk_index = elapsed_ms / CHUNK_MS;
+                if chunk_index > seq && !accumulator.is_empty() {
+                    let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
+                    let rms = (sum_sq / accumulator.len() as f32).sqrt();
+                    if rms > noise_gate_threshold {
+                        let normalized = normalize_audio_level(&accumulator, 0.1);
+                        if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
+                            let _ = app.emit("interview-audio-chunk", serde_json::json!({
+                                "seq": seq,
+                                "base64": b64
+                            }));
+                        }
+                    }
+                    seq = chunk_index;
+                    accumulator.clear();
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

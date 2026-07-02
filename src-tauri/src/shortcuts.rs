@@ -87,6 +87,16 @@ pub fn handle_shortcut_action<R: Runtime>(app: &AppHandle<R>, action_id: &str) {
         "audio_recording" => handle_audio_shortcut(app),
         "screenshot" => handle_screenshot_shortcut(app),
         "system_audio" => handle_system_audio_shortcut(app),
+        "interview_fire" => {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(e) = window.emit(
+                    "custom-shortcut-triggered",
+                    json!({ "action": "interview_fire" }),
+                ) {
+                    eprintln!("Failed to emit interview_fire event: {}", e);
+                }
+            }
+        }
         custom_action => {
             // Emit custom action event for frontend to handle
             if let Some(window) = app.get_webview_window("main") {

@@ -19,7 +19,7 @@ export const RESPONSE_LENGTHS: ResponseLengthOption[] = [
     description:
       "AI determines the best length based on your question's complexity",
     prompt:
-      "IMPORTANT: Carefully assess the complexity and scope of the question, then adjust your response length accordingly. For simple questions, be brief (2-4 sentences). For moderate questions, provide balanced detail (1-2 paragraphs). For complex questions, give comprehensive answers with appropriate depth. Always match the response length to what the question actually requires - no more, no less.",
+      "IMPORTANT: Match response length to the question's complexity. Simple question \u2192 minimal response (2-4 sentences of prose, or 3-4 items if the system prompt requests a structured/cue format). Complex question \u2192 fuller response. Never pad.",
   },
   {
     id: "short",
@@ -27,21 +27,21 @@ export const RESPONSE_LENGTHS: ResponseLengthOption[] = [
     description:
       "Best for quick answers, summaries, and when you need to save time",
     prompt:
-      "IMPORTANT: You must keep your response extremely brief and concise. Limit your answer to 2-4 sentences maximum. Provide only the most essential information. Do not include explanations, examples, or additional context unless explicitly requested. Get straight to the point. This is a strict requirement.",
+      "IMPORTANT: Be extremely brief. In prose, 2-4 sentences maximum. If the system prompt requests a structured/cue format, use the minimum items (3-4 cue lines). Essential information only. This is a strict requirement.",
   },
   {
     id: "medium",
     title: "Medium",
     description: "Balanced responses with adequate explanations for most tasks",
     prompt:
-      "IMPORTANT: Provide responses with moderate length - not too brief, not too lengthy. Keep your answer to 1-2 paragraphs (approximately 4-8 sentences). Include key explanations and relevant details, but avoid being overly verbose or adding unnecessary elaboration. Stay focused and well-organized. This is a strict requirement.",
+      "IMPORTANT: Moderate length. In prose, 1-2 paragraphs (4-8 sentences). If the system prompt requests a structured/cue format, use 5-6 cue lines. Key details included, no padding. This is a strict requirement.",
   },
   {
     id: "long",
     title: "Long",
     description: "Thorough, comprehensive answers with depth and reasoning",
     prompt:
-      "IMPORTANT: Provide a thorough, comprehensive answer. Use multiple well-structured paragraphs with depth, concrete examples, and reasoning. Be complete without padding or repetition. This is a strict requirement.",
+      "IMPORTANT: Thorough and complete. In prose, multiple well-structured paragraphs. If the system prompt requests a structured/cue format, use up to 8 cue lines plus any structured blocks it defines. Complete without repetition. This is a strict requirement.",
   },
 ];
 
