@@ -78,7 +78,7 @@ export interface ChatConversation {
 export type useSystemAudioType = ReturnType<typeof useSystemAudio>;
 
 export function useSystemAudio() {
-  const { resizeWindow } = useWindowResize();
+  const { resizeWindow, updateOverlayWindowSize } = useWindowResize();
   const globalShortcuts = useGlobalShortcuts();
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -1377,6 +1377,7 @@ export function useSystemAudio() {
     startNewConversation,
     // Window resize
     resizeWindow,
+    updateOverlayWindowSize,
     quickActions,
     addQuickAction,
     removeQuickAction,

@@ -30,6 +30,7 @@ export const STORAGE_KEYS = {
   PROMPT_CAPTURE_LAST: "prompt_capture_last",
   CAPTURE_MODE: "capture_mode",
   INTERVIEW_BUFFER: "interview_buffer",
+  OVERLAY_PANEL_SIZE: "overlay_panel_size",
 } as const;
 
 // Maximum age for jobs shown in search results (days)

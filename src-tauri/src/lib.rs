@@ -110,6 +110,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             window::set_window_height,
+            window::set_window_size,
             window::open_dashboard,
             capture::capture_to_base64,
             capture::start_screen_capture,

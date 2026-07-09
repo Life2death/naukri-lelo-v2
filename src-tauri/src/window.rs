@@ -55,8 +55,30 @@ pub fn position_window_top_center(
 pub fn set_window_height(window: tauri::WebviewWindow, height: u32) -> Result<(), String> {
     use tauri::{LogicalSize, Size};
 
-    // Simply set the window size with fixed width and new height
-    let new_size = LogicalSize::new(600.0, height as f64);
+    let current_size = window
+        .inner_size()
+        .map_err(|e| format!("Failed to get current window size: {}", e))?;
+    let scale_factor = window
+        .scale_factor()
+        .map_err(|e| format!("Failed to get window scale factor: {}", e))?;
+    let width = current_size.width as f64 / scale_factor;
+    let new_size = LogicalSize::new(width, height as f64);
+    window
+        .set_size(Size::Logical(new_size))
+        .map_err(|e| format!("Failed to resize window: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_window_size(
+    window: tauri::WebviewWindow,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    use tauri::{LogicalSize, Size};
+
+    let new_size = LogicalSize::new(width as f64, height as f64);
     window
         .set_size(Size::Logical(new_size))
         .map_err(|e| format!("Failed to resize window: {}", e))?;

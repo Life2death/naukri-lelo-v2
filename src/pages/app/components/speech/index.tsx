@@ -5,6 +5,7 @@ import {
   PopoverTrigger,
   PopoverContent,
   ScrollArea,
+  Slider,
 } from "@/components";
 import {
   HeadphonesIcon,
@@ -17,6 +18,8 @@ import {
   RefreshCw,
   SendHorizonalIcon,
   Trash2Icon,
+  Maximize2Icon,
+  RotateCcwIcon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ModeSwitcher, CaptureMode } from "./ModeSwitcher";
@@ -31,6 +34,12 @@ import { useApp } from "@/contexts";
 import { cn } from "@/lib/utils";
 import { ResponseQuickSettings } from "../completion/ResponseQuickSettings";
 import { RESPONSE_LENGTHS } from "@/lib";
+import {
+  DEFAULT_OVERLAY_PANEL_SIZE,
+  getOverlayPanelSize,
+  OVERLAY_SIZE_LIMITS,
+  OverlayPanelSize,
+} from "@/hooks/useWindow";
 
 export const SystemAudio = (props: useSystemAudioType) => {
   const {
@@ -80,12 +89,31 @@ export const SystemAudio = (props: useSystemAudioType) => {
     clearInterviewBuffer,
     useCopilotPrompt,
     setUseCopilotPrompt,
+    updateOverlayWindowSize,
   } = props;
 
   const { supportsImages } = useApp();
 
   // View mode toggle
   const [conversationMode, setConversationMode] = useState(false);
+  const [panelSize, setPanelSize] = useState<OverlayPanelSize>(() =>
+    getOverlayPanelSize()
+  );
+
+  useEffect(() => {
+    const handlePanelSizeChanged = () => {
+      setPanelSize(getOverlayPanelSize());
+    };
+
+    window.addEventListener("overlay-panel-size-changed", handlePanelSizeChanged);
+
+    return () => {
+      window.removeEventListener(
+        "overlay-panel-size-changed",
+        handlePanelSizeChanged
+      );
+    };
+  }, []);
 
   // Screenshot state
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
@@ -178,6 +206,22 @@ export const SystemAudio = (props: useSystemAudioType) => {
     setScreenshotImage(null);
   }, []);
 
+  const handlePanelSizeChange = useCallback(
+    async (nextSize: Partial<OverlayPanelSize>) => {
+      const savedSize = await updateOverlayWindowSize({
+        ...panelSize,
+        ...nextSize,
+      });
+      setPanelSize(savedSize);
+    },
+    [panelSize, updateOverlayWindowSize]
+  );
+
+  const resetPanelSize = useCallback(async () => {
+    const savedSize = await updateOverlayWindowSize(DEFAULT_OVERLAY_PANEL_SIZE);
+    setPanelSize(savedSize);
+  }, [updateOverlayWindowSize]);
+
   const getButtonIcon = () => {
     if (setupRequired) return <AlertCircleIcon className="text-orange-500" />;
     if (error && !setupRequired)
@@ -261,6 +305,95 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       <ResponseQuickSettings />
 
                       {/* Regenerate at length */}
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 cursor-pointer"
+                            title="Adjust live answer panel size"
+                          >
+                            <Maximize2Icon className="h-3.5 w-3.5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="end"
+                          side="bottom"
+                          className="w-60 p-3"
+                          sideOffset={4}
+                        >
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium select-none">
+                                Panel size
+                              </p>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                title="Reset panel size"
+                                onClick={resetPanelSize}
+                              >
+                                <RotateCcwIcon className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                <span>Width</span>
+                                <span>{panelSize.width}px</span>
+                              </div>
+                              <Slider
+                                value={[panelSize.width]}
+                                min={OVERLAY_SIZE_LIMITS.minWidth}
+                                max={OVERLAY_SIZE_LIMITS.maxWidth}
+                                step={20}
+                                onValueChange={([width]) => {
+                                  if (width) {
+                                    setPanelSize((current) => ({
+                                      ...current,
+                                      width,
+                                    }));
+                                  }
+                                }}
+                                onValueCommit={([width]) => {
+                                  if (width) {
+                                    handlePanelSizeChange({ width });
+                                  }
+                                }}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                <span>Height</span>
+                                <span>{panelSize.height}px</span>
+                              </div>
+                              <Slider
+                                value={[panelSize.height]}
+                                min={OVERLAY_SIZE_LIMITS.minHeight}
+                                max={OVERLAY_SIZE_LIMITS.maxHeight}
+                                step={20}
+                                onValueChange={([height]) => {
+                                  if (height) {
+                                    setPanelSize((current) => ({
+                                      ...current,
+                                      height,
+                                    }));
+                                  }
+                                }}
+                                onValueCommit={([height]) => {
+                                  if (height) {
+                                    handlePanelSizeChange({ height });
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
+                      {/* Regenerate at length — ported from the typed-completion panel */}
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
