@@ -3446,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "naukri-lelo"
-version = "7.1.1"
+version = "7.1.2"
 dependencies = [
  "aes-gcm",
  "anyhow",

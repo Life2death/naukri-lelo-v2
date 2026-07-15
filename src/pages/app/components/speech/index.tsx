@@ -96,6 +96,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
   // View mode toggle
   const [conversationMode, setConversationMode] = useState(false);
+  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
   const [panelSize, setPanelSize] = useState<OverlayPanelSize>(() =>
     getOverlayPanelSize()
   );
@@ -122,7 +123,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
   const isVadMode = captureMode === "vad";
   const isInterviewMode = captureMode === "interview";
   const hasResponse = lastAIResponse || isAIProcessing;
-  const showPopover = capturing || setupRequired || error || interviewCapturing || isInterviewMode;
+  const showPopover =
+    isPopoverOpen ||
+    capturing ||
+    setupRequired ||
+    error ||
+    interviewCapturing ||
+    isInterviewMode;
 
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const modKey = isMac ? "⌘" : "Ctrl";
@@ -164,11 +171,25 @@ export const SystemAudio = (props: useSystemAudioType) => {
     }
   };
 
-  const handleModeChange = (mode: CaptureMode) => {
-    if (capturing || interviewCapturing) {
-      return; // Don't switch modes while capturing
+  const handleModeChange = async (mode: CaptureMode) => {
+    if (mode === captureMode || isSwitchingMode) return;
+
+    setIsSwitchingMode(true);
+    try {
+      if (
+        capturing ||
+        interviewCapturing ||
+        isRecordingInContinuousMode
+      ) {
+        await stopCapture(true);
+      }
+
+      setCaptureMode(mode);
+      setIsPopoverOpen(true);
+      await resizeWindow(true);
+    } finally {
+      setIsSwitchingMode(false);
     }
-    setCaptureMode(mode);
   };
 
   // Capture screenshot functionality
@@ -278,16 +299,14 @@ export const SystemAudio = (props: useSystemAudioType) => {
           <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
             {/* Header - Mode Switcher + Actions */}
             <div className="flex-shrink-0 p-3 border-b border-border/50">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-2">
                 {/* Mode Switcher */}
                 {!setupRequired && (
                   <ModeSwitcher
                     captureMode={captureMode}
                     onModeChange={handleModeChange}
                     disabled={
-                      capturing ||
-                      interviewCapturing ||
-                      isRecordingInContinuousMode ||
+                      isSwitchingMode ||
                       isProcessing ||
                       isAIProcessing ||
                       isFireProcessing
@@ -299,12 +318,12 @@ export const SystemAudio = (props: useSystemAudioType) => {
                 )}
 
                 {/* Action Buttons */}
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {!setupRequired && !isInterviewMode && (
+                <div className="flex items-center justify-end gap-1.5">
+                  {!setupRequired && (
                     <>
-                      <ResponseQuickSettings />
+                      {!isInterviewMode && <ResponseQuickSettings />}
 
-                      {/* Regenerate at length */}
+                      {/* Panel size */}
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -394,6 +413,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       </Popover>
 
                       {/* Regenerate at length — ported from the typed-completion panel */}
+                      {!isInterviewMode && (
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -427,6 +447,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                           ))}
                         </PopoverContent>
                       </Popover>
+                      )}
                     </>
                   )}
 

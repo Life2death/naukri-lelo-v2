@@ -1050,7 +1050,7 @@ export function useSystemAudio() {
     }
   }, [vadConfig, selectedAudioDevices.output.id]);
 
-  const stopCapture = useCallback(async () => {
+  const stopCapture = useCallback(async (keepPopoverOpen = false) => {
     try {
       // Abort any ongoing AI requests
       if (abortControllerRef.current) {
@@ -1084,7 +1084,7 @@ export function useSystemAudio() {
       setLastTranscription("");
       setLastAIResponse("");
       setError("");
-      setIsPopoverOpen(false);
+      setIsPopoverOpen(keepPopoverOpen);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(`Failed to stop capture: ${errorMessage}`);
@@ -1148,8 +1148,10 @@ export function useSystemAudio() {
       !!lastAIResponse ||
       !!error ||
       (captureMode === "interview" && !!interviewBufferText);
-    setIsPopoverOpen(shouldOpenPopover);
-    resizeWindow(shouldOpenPopover);
+    if (shouldOpenPopover) {
+      setIsPopoverOpen(true);
+      resizeWindow(true);
+    }
   }, [
     capturing,
     setupRequired,
