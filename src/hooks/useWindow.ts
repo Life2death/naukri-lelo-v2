@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { STORAGE_KEYS } from "@/config";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 export type OverlayPanelSize = {
   width: number;
@@ -87,6 +87,14 @@ const isAnyPopoverOpen = (): boolean => {
 };
 
 export const useWindowResize = () => {
+  // Pending auto-collapse (from the drag/popover-close watchers below). Kept
+  // outside React state so an explicit resizeWindow(true) can cancel it
+  // synchronously — otherwise the collapse and a same-tick expand race each
+  // other over IPC with no ordering guarantee, and whichever `set_window_size`
+  // call resolves last wins. That race is what made the panel snap back to
+  // its collapsed size right as you switched Auto-detect/Interview mode.
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const setWindowSize = useCallback(async (size: OverlayPanelSize) => {
     try {
       const window = getCurrentWebviewWindow();
@@ -102,6 +110,11 @@ export const useWindowResize = () => {
   }, []);
 
   const resizeWindow = useCallback(async (expanded: boolean) => {
+    if (expanded && collapseTimerRef.current) {
+      clearTimeout(collapseTimerRef.current);
+      collapseTimerRef.current = null;
+    }
+
     try {
       if (!expanded && isAnyPopoverOpen()) {
         return;
@@ -114,6 +127,20 @@ export const useWindowResize = () => {
       console.error("Failed to resize window:", error);
     }
   }, [setWindowSize]);
+
+  // Debounced collapse: gives any explicit resizeWindow(true) a window to
+  // cancel this before it fires, instead of the two calls racing over IPC.
+  const scheduleCollapse = useCallback((delayMs: number) => {
+    if (collapseTimerRef.current) {
+      clearTimeout(collapseTimerRef.current);
+    }
+    collapseTimerRef.current = setTimeout(() => {
+      collapseTimerRef.current = null;
+      if (!isAnyPopoverOpen()) {
+        resizeWindow(false);
+      }
+    }, delayMs);
+  }, [resizeWindow]);
 
   const updateOverlayWindowSize = useCallback(
     async (size: Partial<OverlayPanelSize>) => {
@@ -140,19 +167,12 @@ export const useWindowResize = () => {
     const handleMouseUp = async () => {
       if (isDragging) {
         isDragging = false;
-
-        setTimeout(() => {
-          if (!isAnyPopoverOpen()) {
-            resizeWindow(false);
-          }
-        }, 100);
+        scheduleCollapse(100);
       }
     };
 
     const observer = new MutationObserver(() => {
-      if (!isAnyPopoverOpen()) {
-        resizeWindow(false);
-      }
+      scheduleCollapse(200);
     });
 
     // Observe the body for changes to detect popover open/close
@@ -170,8 +190,12 @@ export const useWindowResize = () => {
       document.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("mouseup", handleMouseUp);
       observer.disconnect();
+      if (collapseTimerRef.current) {
+        clearTimeout(collapseTimerRef.current);
+        collapseTimerRef.current = null;
+      }
     };
-  }, [resizeWindow]);
+  }, [scheduleCollapse]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;

@@ -200,7 +200,11 @@ export const SystemAudio = (props: useSystemAudioType) => {
         interviewCapturing ||
         isRecordingInContinuousMode
       ) {
-        await stopCapture(true);
+        // preserveResponse: Manual is a different capture pipeline under the
+        // hood, but from the user's side it's the same interview session —
+        // switching to/from it shouldn't clear the last question/answer any
+        // more than the vad<->interview live toggle above does.
+        await stopCapture(true, true);
       }
 
       setCaptureMode(mode);

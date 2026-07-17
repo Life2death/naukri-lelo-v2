@@ -105,15 +105,24 @@ pub async fn start_system_audio_capture(
         .lock()
         .map_err(|e| format!("Failed to set capturing state: {}", e))? = true;
 
+    // Shared with the interview capture pipeline: while true, our own
+    // spoken-answer (TTS) output is playing through the same device this
+    // loopback captures, so incoming audio must be discarded rather than
+    // recorded/transcribed as if it were the interviewer.
+    // Start unmuted — a prior session may have left this set.
+    let interview_state = app.state::<crate::InterviewState>();
+    interview_state.muted.store(false, Ordering::Release);
+    let muted = interview_state.muted.clone();
+
     // Emit capture started event
     let _ = app_clone.emit("capture-started", sr);
 
     let state_clone = app.state::<crate::AudioState>();
     let task = tokio::spawn(async move {
         if vad_config.enabled {
-            run_vad_capture(app_clone.clone(), stream, sr, vad_config).await;
+            run_vad_capture(app_clone.clone(), stream, sr, vad_config, muted).await;
         } else {
-            run_continuous_capture(app_clone.clone(), stream, sr, vad_config).await;
+            run_continuous_capture(app_clone.clone(), stream, sr, vad_config, muted).await;
         }
 
         let state = app_clone.state::<crate::AudioState>();
@@ -138,6 +147,7 @@ async fn run_vad_capture(
     stream: impl StreamExt<Item = f32> + Unpin,
     sr: u32,
     config: VadConfig,
+    muted: Arc<AtomicBool>,
 ) {
     let mut stream = stream;
     let mut buffer: VecDeque<f32> = VecDeque::new();
@@ -150,6 +160,21 @@ async fn run_vad_capture(
     let max_samples = sr as usize * 30; // 30s safety cap per utterance
 
     while let Some(sample) = stream.next().await {
+        // While muted (our own TTS answer is playing through the captured
+        // output device), discard audio and reset any in-progress detection
+        // so the spoken answer is never buffered or transcribed.
+        if muted.load(Ordering::Acquire) {
+            if in_speech || !speech_buffer.is_empty() {
+                speech_buffer.clear();
+                in_speech = false;
+                silence_chunks = 0;
+                speech_chunks = 0;
+            }
+            pre_speech.clear();
+            buffer.clear();
+            continue;
+        }
+
         buffer.push_back(sample);
 
         // Process in fixed chunks for VAD analysis
@@ -263,6 +288,7 @@ async fn run_continuous_capture(
     stream: impl StreamExt<Item = f32> + Unpin,
     sr: u32,
     config: VadConfig,
+    muted: Arc<AtomicBool>,
 ) {
     let mut stream = stream;
     let max_samples = (sr as u64 * config.max_recording_duration_secs) as usize;
@@ -302,18 +328,24 @@ async fn run_continuous_capture(
                             break;
                         }
 
-                        audio_buffer.push(sample);
-
                         let elapsed = start_time.elapsed();
 
-                        // Emit progress every second
-                        if audio_buffer.len() % (sr as usize) == 0 {
-                            let _ = app.emit("recording-progress", elapsed.as_secs());
-                        }
+                        // While muted (our own TTS answer is playing through the
+                        // captured output device), discard audio so the spoken
+                        // answer never ends up baked into the recording and
+                        // re-transcribed as if the interviewer said it.
+                        if !muted.load(Ordering::Acquire) {
+                            audio_buffer.push(sample);
 
-                        // Check size limit (safety)
-                        if audio_buffer.len() >= max_samples {
-                            break;
+                            // Emit progress every second
+                            if audio_buffer.len() % (sr as usize) == 0 {
+                                let _ = app.emit("recording-progress", elapsed.as_secs());
+                            }
+
+                            // Check size limit (safety)
+                            if audio_buffer.len() >= max_samples {
+                                break;
+                            }
                         }
 
                         // Check time limit

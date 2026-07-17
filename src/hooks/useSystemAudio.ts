@@ -161,7 +161,10 @@ export function useSystemAudio() {
   const allSttProvidersRef = useRef(allSttProviders);
   // Auto-detect and Interview share one always-accumulating capture pipeline.
   // They differ only in whether each captured utterance is auto-answered.
-  const autoAnswerRef = useRef(false);
+  // Kept in sync synchronously by handleCaptureModeChange (not a captureMode
+  // effect) so an utterance captured immediately after a mode switch can't
+  // be routed by a still-stale ref from before the switch.
+  const autoAnswerRef = useRef(captureMode === "vad");
   const autoAnswerFireRef = useRef<((question: string) => void) | null>(null);
 
   // Both Auto-detect ("vad") and Interview use the same continuous,
@@ -187,10 +190,6 @@ export function useSystemAudio() {
   useEffect(() => {
     allSttProvidersRef.current = allSttProviders;
   }, [allSttProviders]);
-
-  useEffect(() => {
-    autoAnswerRef.current = captureMode === "vad";
-  }, [captureMode]);
 
   useEffect(() => {
     // Post-speech drain: keep capture muted a bit after TTS ends so the tail
@@ -335,6 +334,10 @@ export function useSystemAudio() {
   // backend by startCapture(mode), which every caller of this invokes right
   // after — doing it here too would push the config to Rust twice per switch.
   const handleCaptureModeChange = useCallback((mode: CaptureMode) => {
+    // Set synchronously (not via a captureMode-keyed effect) so an utterance
+    // captured right after a live vad<->interview toggle is never routed by
+    // a ref that hasn't caught up to the new mode yet.
+    autoAnswerRef.current = mode === "vad";
     setCaptureMode(mode);
     safeLocalStorage.setItem(STORAGE_KEYS.CAPTURE_MODE, mode);
   }, []);
@@ -379,6 +382,27 @@ export function useSystemAudio() {
     const processingQueue: { seq: number; base64: string }[] = [];
     let isProcessing = false;
 
+    // Shared by the success path and every failure fallback so a chunk is
+    // never added to interviewChunks without interviewBufferText (and its
+    // ref, which fireInterviewBuffer actually reads) reflecting it in the
+    // same update — otherwise a lone failed utterance is invisible to
+    // "Answer now" until some later utterance happens to re-join the text.
+    const appendChunk = (seq: number, text: string) => {
+      setInterviewChunks((prev) => {
+        const updated = [...prev, { seq, text }];
+        // Ordered concatenation, capped to recent utterances so the
+        // rolling transcript (kept as a safety net in auto mode) can't
+        // grow without bound.
+        const ordered = updated
+          .sort((a, b) => a.seq - b.seq)
+          .slice(-INTERVIEW_TRANSCRIPT_MAX_CHUNKS);
+        const nextText = ordered.map((c) => c.text).join(" ");
+        interviewBufferTextRef.current = nextText;
+        setInterviewBufferText(nextText);
+        return ordered;
+      });
+    };
+
     const processChunk = (seq: number, base64: string) => {
       processingQueue.push({ seq, base64 });
       processQueue();
@@ -395,6 +419,11 @@ export function useSystemAudio() {
           setSttQueueWarning("STT queue depth > 3 — transcription may be behind");
         }
 
+        // Set when a branch below already showed a more specific warning
+        // this iteration, so the queue-depth-cleared branch in `finally`
+        // doesn't immediately stomp it.
+        let specificWarning = false;
+
         try {
           const binaryString = atob(item.base64);
           const bytes = new Uint8Array(binaryString.length);
@@ -406,10 +435,8 @@ export function useSystemAudio() {
           const activeSttProvider = selectedSttProviderRef.current;
           if (!activeSttProvider.provider) {
             setSttQueueWarning("No STT provider configured");
-            setInterviewChunks((prev) => [
-              ...prev,
-              { seq: item.seq, text: "[unclear]" },
-            ]);
+            specificWarning = true;
+            appendChunk(item.seq, "[unclear]");
             continue;
           }
 
@@ -418,10 +445,8 @@ export function useSystemAudio() {
           );
           if (!providerConfig) {
             setSttQueueWarning("STT provider config not found");
-            setInterviewChunks((prev) => [
-              ...prev,
-              { seq: item.seq, text: "[unclear]" },
-            ]);
+            specificWarning = true;
+            appendChunk(item.seq, "[unclear]");
             continue;
           }
 
@@ -433,10 +458,7 @@ export function useSystemAudio() {
               audio: audioBlob,
             });
           } catch {
-            setInterviewChunks((prev) => [
-              ...prev,
-              { seq: item.seq, text: "[unclear]" },
-            ]);
+            appendChunk(item.seq, "[unclear]");
             continue;
           }
 
@@ -453,19 +475,7 @@ export function useSystemAudio() {
           }
 
           const utteranceText = transcription.trim();
-          setInterviewChunks((prev) => {
-            const updated = [...prev, { seq: item.seq, text: utteranceText }];
-            // Ordered concatenation, capped to recent utterances so the
-            // rolling transcript (kept as a safety net in auto mode) can't
-            // grow without bound.
-            const ordered = updated
-              .sort((a, b) => a.seq - b.seq)
-              .slice(-INTERVIEW_TRANSCRIPT_MAX_CHUNKS);
-            const nextText = ordered.map((c) => c.text).join(" ");
-            interviewBufferTextRef.current = nextText;
-            setInterviewBufferText(nextText);
-            return ordered;
-          });
+          appendChunk(item.seq, utteranceText);
 
           // Auto-detect mode: answer each captured utterance immediately,
           // without clearing the transcript buffer (so a missed/mis-fired
@@ -473,16 +483,16 @@ export function useSystemAudio() {
           if (autoAnswerRef.current) {
             autoAnswerFireRef.current?.(utteranceText);
           }
-
+        } catch {
+          appendChunk(item.seq, "[unclear]");
+        } finally {
+          // Always settle the queue-depth counter here — not just on the
+          // success path — so a run of STT failures (e.g. a misconfigured
+          // provider) can't leave "queue depth > 3" stuck showing forever.
           processingCount = Math.max(0, processingCount - 1);
-          if (processingCount <= 2) {
+          if (processingCount <= 2 && !specificWarning) {
             setSttQueueWarning("");
           }
-        } catch {
-          setInterviewChunks((prev) => [
-            ...prev,
-            { seq: item.seq, text: "[unclear]" },
-          ]);
         }
       }
 
@@ -1241,7 +1251,14 @@ export function useSystemAudio() {
     }
   }, [captureMode, vadConfig, selectedAudioDevices.output.id]);
 
-  const stopCapture = useCallback(async (keepPopoverOpen = false) => {
+  const stopCapture = useCallback(async (
+    keepPopoverOpen = false,
+    // Set by a mode switch (Auto-detect/Interview/Manual are gears on the
+    // same session, not separate sessions) so the last question/answer
+    // stays on screen across the switch instead of the panel visibly
+    // resetting — only a genuine "stop capturing" action should clear it.
+    preserveResponse = false
+  ) => {
     try {
       // Abort any ongoing AI requests
       if (abortControllerRef.current) {
@@ -1273,8 +1290,10 @@ export function useSystemAudio() {
       setIsContinuousMode(false);
       setIsRecordingInContinuousMode(false);
       setRecordingProgress(0);
-      setLastTranscription("");
-      setLastAIResponse("");
+      if (!preserveResponse) {
+        setLastTranscription("");
+        setLastAIResponse("");
+      }
       setError("");
       setIsPopoverOpen(keepPopoverOpen);
     } catch (err) {
