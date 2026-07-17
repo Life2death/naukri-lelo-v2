@@ -1,254 +1,198 @@
-import { Button, Header, Input, Selection, TextInput } from "@/components";
+import { Button, Input } from "@/components";
+import { STORAGE_KEYS } from "@/config/constants";
+import { safeLocalStorage } from "@/lib";
 import { UseSettingsReturn } from "@/types";
-import curl2Json, { ResultJSON } from "@bany/curl-to-json";
-import { KeyIcon, TrashIcon } from "lucide-react";
+import { CheckIcon, SaveIcon, TrashIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+const DEFAULT_GROQ_STT_MODEL = "whisper-large-v3-turbo";
+
 export const Providers = ({
-  allSttProviders,
   selectedSttProvider,
   onSetSelectedSttProvider,
-  sttVariables,
 }: UseSettingsReturn) => {
-  const [localSelectedProvider, setLocalSelectedProvider] =
-    useState<ResultJSON | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState(DEFAULT_GROQ_STT_MODEL);
+  const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
+    "idle"
+  );
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
-    if (selectedSttProvider?.provider) {
-      const provider = allSttProviders?.find(
-        (p) => p?.id === selectedSttProvider?.provider
-      );
-      if (provider) {
-        const json = curl2Json(provider?.curl);
-        setLocalSelectedProvider(json as ResultJSON);
-      }
+    if (selectedSttProvider.provider !== "groq") return;
+
+    setApiKey(selectedSttProvider.variables?.api_key || "");
+    setModel(
+      selectedSttProvider.variables?.model || DEFAULT_GROQ_STT_MODEL
+    );
+  }, [selectedSttProvider]);
+
+  const hasSavedApiKey = Boolean(
+    selectedSttProvider.provider === "groq" &&
+      selectedSttProvider.variables?.api_key
+  );
+
+  const clearSaveState = () => {
+    setSaveState("idle");
+    setSaveMessage("");
+  };
+
+  const persistSelection = (nextSelection: {
+    provider: string;
+    variables: Record<string, string>;
+  }) => {
+    const serializedSelection = JSON.stringify(nextSelection);
+    onSetSelectedSttProvider(nextSelection);
+    safeLocalStorage.setItem(
+      STORAGE_KEYS.SELECTED_STT_PROVIDER,
+      serializedSelection
+    );
+    return (
+      safeLocalStorage.getItem(STORAGE_KEYS.SELECTED_STT_PROVIDER) ===
+      serializedSelection
+    );
+  };
+
+  const saveSettings = () => {
+    const trimmedApiKey = apiKey.trim();
+    const trimmedModel = model.trim();
+
+    if (!trimmedApiKey || !trimmedModel) {
+      setSaveState("error");
+      setSaveMessage("Enter both the Groq API key and model.");
+      return;
     }
-  }, [selectedSttProvider?.provider]);
 
-  const findKeyAndValue = (key: string) => {
-    return sttVariables?.find((v) => v?.key === key);
+    const saved = persistSelection({
+      provider: "groq",
+      variables: { api_key: trimmedApiKey, model: trimmedModel },
+    });
+
+    if (!saved) {
+      setSaveState("error");
+      setSaveMessage("The settings could not be saved. Please try again.");
+      return;
+    }
+
+    setSaveState("saved");
+    setSaveMessage("Groq STT settings saved.");
   };
 
-  const getApiKeyValue = () => {
-    const apiKeyVar = findKeyAndValue("api_key");
-    if (!apiKeyVar || !selectedSttProvider?.variables) return "";
-    return selectedSttProvider?.variables?.[apiKeyVar.key] || "";
-  };
+  const removeApiKey = () => {
+    const removed = persistSelection({
+      provider: "groq",
+      variables: { ...selectedSttProvider.variables, api_key: "" },
+    });
 
-  const isApiKeyEmpty = () => {
-    return !getApiKeyValue().trim();
-  };
+    setApiKey("");
 
-  const isGroq = selectedSttProvider?.provider === "groq";
+    if (!removed) {
+      setSaveState("error");
+      setSaveMessage("The API key could not be removed. Please try again.");
+      return;
+    }
+
+    setSaveState("idle");
+    setSaveMessage("Groq API key removed.");
+  };
 
   return (
-    <div className="space-y-3">
-      {isGroq && isApiKeyEmpty() && (
-        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-2">
-          <p className="text-xs font-semibold text-green-400">
-            ✦ Recommended: Groq Whisper — ultra-fast transcription, free tier available
-          </p>
-          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-            <li>
-              Visit{" "}
-              <a
-                href="https://console.groq.com/keys"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-green-400 underline underline-offset-2"
-              >
-                console.groq.com/keys
-              </a>{" "}
-              and sign up for free (no credit card needed)
-            </li>
-            <li>Click <strong>Create API Key</strong>, copy it</li>
-            <li>Paste it in the API Key field below</li>
-          </ol>
-          <p className="text-xs text-muted-foreground">
-            Model is pre-filled as <code className="text-green-300">whisper-large-v3-turbo</code> — the fastest option on Groq's free tier.
-          </p>
-        </div>
-      )}
-      <div className="space-y-2">
-        <Header
-          title="Select STT Provider"
-          description="Select your preferred STT service provider or custom providers to get started."
-        />
-        <Selection
-          selected={selectedSttProvider?.provider}
-          options={allSttProviders?.map((provider) => {
-            const json = curl2Json(provider?.curl);
-            return {
-              label: provider?.isCustom
-                ? json?.url || "Custom Provider"
-                : provider?.id || "Custom Provider",
-              value: provider?.id || "Custom Provider",
-              isCustom: provider?.isCustom,
-            };
-          })}
-          placeholder="Choose your STT provider"
-          onChange={(value) => {
-            onSetSelectedSttProvider({
-              provider: value,
-              variables: {},
-            });
-          }}
-        />
+    <div className="space-y-4">
+      <div className="space-y-2 rounded-lg border border-green-500/30 bg-green-500/5 p-3">
+        <p className="text-xs font-semibold text-green-400">
+          Recommended: Groq Whisper - ultra-fast transcription, free tier
+          available
+        </p>
+        <ol className="list-inside list-decimal space-y-1 text-xs text-muted-foreground">
+          <li>
+            Visit{" "}
+            <a
+              href="https://console.groq.com/keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-400 underline underline-offset-2"
+            >
+              console.groq.com/keys
+            </a>{" "}
+            and sign up for free (no credit card needed)
+          </li>
+          <li>
+            Click <strong>Create API Key</strong>, copy it
+          </li>
+          <li>Paste it in the API Key field below</li>
+        </ol>
+        <p className="text-xs text-muted-foreground">
+          Model is pre-filled as{" "}
+          <code className="text-green-300">{DEFAULT_GROQ_STT_MODEL}</code> -
+          the fastest option on Groq&apos;s free tier.
+        </p>
       </div>
-      {localSelectedProvider ? (
-        <Header
-          title={`Method: ${
-            localSelectedProvider?.method || "Invalid"
-          }, Endpoint: ${localSelectedProvider?.url || "Invalid"}`}
-          description={`If you want to use different url or method, you can always create a custom provider.`}
-        />
-      ) : null}
-      {findKeyAndValue("api_key") ? (
-        <div className="space-y-2">
-          <Header
-            title="API Key"
-            description={`Enter your ${
-              allSttProviders?.find(
-                (p) => p?.id === selectedSttProvider?.provider
-              )?.isCustom
-                ? "Custom Provider"
-                : selectedSttProvider?.provider
-            } API key to authenticate and access STT models. Your key is stored locally and never shared.`}
+
+      <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+        <h3 className="text-sm font-semibold">Groq</h3>
+
+        <div className="space-y-1.5">
+          <label htmlFor="groq-stt-api-key" className="text-xs font-medium">
+            API Key
+          </label>
+          <Input
+            id="groq-stt-api-key"
+            type="password"
+            placeholder="gsk_..."
+            value={apiKey}
+            onChange={(event) => {
+              setApiKey(event.target.value);
+              clearSaveState();
+            }}
+            className="h-11"
           />
+        </div>
 
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                placeholder="**********"
-                value={getApiKeyValue()}
-                onChange={(value) => {
-                  const apiKeyVar = findKeyAndValue("api_key");
-                  if (!apiKeyVar || !selectedSttProvider) return;
+        <div className="space-y-1.5">
+          <label htmlFor="groq-stt-model" className="text-xs font-medium">
+            Model
+          </label>
+          <Input
+            id="groq-stt-model"
+            value={model}
+            onChange={(event) => {
+              setModel(event.target.value);
+              clearSaveState();
+            }}
+            className="h-11"
+          />
+        </div>
 
-                  onSetSelectedSttProvider({
-                    ...selectedSttProvider,
-                    variables: {
-                      ...selectedSttProvider.variables,
-                      [apiKeyVar.key]:
-                        typeof value === "string" ? value : value.target.value,
-                    },
-                  });
-                }}
-                onKeyDown={(e) => {
-                  const apiKeyVar = findKeyAndValue("api_key");
-                  if (!apiKeyVar || !selectedSttProvider) return;
-
-                  onSetSelectedSttProvider({
-                    ...selectedSttProvider,
-                    variables: {
-                      ...selectedSttProvider.variables,
-                      [apiKeyVar.key]: (e.target as HTMLInputElement).value,
-                    },
-                  });
-                }}
-                disabled={false}
-                className="flex-1 h-11 border-1 border-input/50 focus:border-primary/50 transition-colors"
-              />
-              {isApiKeyEmpty() ? (
-                <Button
-                  onClick={() => {
-                    const apiKeyVar = findKeyAndValue("api_key");
-                    if (!apiKeyVar || !selectedSttProvider || isApiKeyEmpty())
-                      return;
-
-                    onSetSelectedSttProvider({
-                      ...selectedSttProvider,
-                      variables: {
-                        ...selectedSttProvider.variables,
-                        [apiKeyVar.key]: getApiKeyValue(),
-                      },
-                    });
-                  }}
-                  disabled={isApiKeyEmpty()}
-                  size="icon"
-                  className="shrink-0 h-11 w-11"
-                  title="Submit API Key"
-                >
-                  <KeyIcon className="h-4 w-4" />
-                </Button>
+        <div className="flex min-h-9 items-center justify-between gap-3">
+          <p
+            role="status"
+            className={`text-xs ${
+              saveState === "error" ? "text-destructive" : "text-green-500"
+            }`}
+          >
+            {saveMessage}
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={removeApiKey}
+              disabled={!hasSavedApiKey}
+              title="Remove the saved Groq API key"
+            >
+              <TrashIcon className="h-4 w-4" />
+              Remove
+            </Button>
+            <Button type="button" onClick={saveSettings}>
+              {saveState === "saved" ? (
+                <CheckIcon className="h-4 w-4" />
               ) : (
-                <Button
-                  onClick={() => {
-                    const apiKeyVar = findKeyAndValue("api_key");
-                    if (!apiKeyVar || !selectedSttProvider) return;
-
-                    onSetSelectedSttProvider({
-                      ...selectedSttProvider,
-                      variables: {
-                        ...selectedSttProvider.variables,
-                        [apiKeyVar.key]: "",
-                      },
-                    });
-                  }}
-                  size="icon"
-                  variant="destructive"
-                  className="shrink-0 h-11 w-11"
-                  title="Remove API Key"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </Button>
+                <SaveIcon className="h-4 w-4" />
               )}
-            </div>
+              {saveState === "saved" ? "Saved" : "Save"}
+            </Button>
           </div>
         </div>
-      ) : null}
-
-      <div className="space-y-4 mt-2">
-        {sttVariables
-          ?.filter(
-            (variable) => variable?.key !== findKeyAndValue("api_key")?.key
-          )
-          .map((variable) => {
-            const getVariableValue = () => {
-              if (!variable?.key || !selectedSttProvider?.variables) return "";
-              return selectedSttProvider.variables[variable.key] || "";
-            };
-
-            return (
-              <div className="space-y-1" key={variable?.key}>
-                <Header
-                  title={variable?.value || ""}
-                  description={`add your preferred ${variable?.key?.replace(
-                    /_/g,
-                    " "
-                  )} for ${
-                    allSttProviders?.find(
-                      (p) => p?.id === selectedSttProvider?.provider
-                    )?.isCustom
-                      ? "Custom Provider"
-                      : selectedSttProvider?.provider
-                  }`}
-                />
-                <TextInput
-                  placeholder={`Enter ${
-                    allSttProviders?.find(
-                      (p) => p?.id === selectedSttProvider?.provider
-                    )?.isCustom
-                      ? "Custom Provider"
-                      : selectedSttProvider?.provider
-                  } ${variable?.key?.replace(/_/g, " ") || "value"}`}
-                  value={getVariableValue()}
-                  onChange={(value) => {
-                    if (!variable?.key || !selectedSttProvider) return;
-
-                    onSetSelectedSttProvider({
-                      ...selectedSttProvider,
-                      variables: {
-                        ...selectedSttProvider.variables,
-                        [variable.key]: value,
-                      },
-                    });
-                  }}
-                />
-              </div>
-            );
-          })}
       </div>
     </div>
   );

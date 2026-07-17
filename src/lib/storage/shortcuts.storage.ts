@@ -224,6 +224,7 @@ export const validateShortcutKey = (key: string): boolean => {
     "semicolon",
     "quote",
     "grave",
+    "capslock",
   ];
 
   return parts.every((p) => validKeys.includes(p));

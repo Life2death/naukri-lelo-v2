@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getShortcutsConfig } from "@/lib";
 
 // Global singleton to prevent multiple event listeners in StrictMode
@@ -255,15 +255,34 @@ export const useGlobalShortcuts = () => {
     setupEventListeners();
   }, []);
 
-  return {
-    checkShortcutsRegistered,
-    getShortcuts,
-    updateShortcuts,
-    registerInputRef,
-    registerAudioCallback,
-    registerScreenshotCallback,
-    registerSystemAudioCallback,
-    registerCustomShortcutCallback,
-    unregisterCustomShortcutCallback,
-  };
+  // Memoized so consumers can safely list this whole object in a useEffect
+  // dependency array — every field below is itself a useCallback with `[]`
+  // deps, so this is stable for the lifetime of the component. Without this,
+  // a fresh object every render made hotkey-registration effects that
+  // depended on it tear down and re-register constantly, occasionally
+  // dropping a keypress that landed in the gap.
+  return useMemo(
+    () => ({
+      checkShortcutsRegistered,
+      getShortcuts,
+      updateShortcuts,
+      registerInputRef,
+      registerAudioCallback,
+      registerScreenshotCallback,
+      registerSystemAudioCallback,
+      registerCustomShortcutCallback,
+      unregisterCustomShortcutCallback,
+    }),
+    [
+      checkShortcutsRegistered,
+      getShortcuts,
+      updateShortcuts,
+      registerInputRef,
+      registerAudioCallback,
+      registerScreenshotCallback,
+      registerSystemAudioCallback,
+      registerCustomShortcutCallback,
+      unregisterCustomShortcutCallback,
+    ]
+  );
 };

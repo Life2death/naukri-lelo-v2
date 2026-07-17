@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
 use std::task::{Poll, Waker};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::error;
 use wasapi::{get_default_device, DeviceCollection, Direction, SampleType, StreamMode, WaveFormat};
 
@@ -225,6 +225,12 @@ impl SpeakerStream {
             Ok((h_event, render_client, sample_rate)) => {
                 let _ = init_tx.send(Ok(sample_rate));
 
+                // Consecutive *fast* wait failures — used to detect a genuinely
+                // broken event handle (which errors ~instantly) versus ordinary
+                // silence (which blocks the full timeout then reports "not
+                // signaled"). Only the former should stop capture.
+                let mut fast_failures: u32 = 0;
+
                 loop {
                     {
                         let state = waker_state.lock().unwrap();
@@ -233,10 +239,32 @@ impl SpeakerStream {
                         }
                     }
 
+                    // A timeout from `wait_for_event` does NOT mean capture has
+                    // failed — WASAPI loopback simply produces no events while
+                    // the output device is silent (e.g. a natural pause in an
+                    // interview, or nothing playing). Killing the stream here
+                    // permanently stopped capture after the first ~3s of silence.
+                    // Keep waiting instead; only bail out if the wait keeps
+                    // failing *immediately*, which indicates a broken handle
+                    // rather than mere silence.
+                    let wait_start = Instant::now();
                     if h_event.wait_for_event(3000).is_err() {
-                        error!("Naukri Lelo timeout error, stopping capture");
-                        break;
+                        if wait_start.elapsed() < Duration::from_millis(500) {
+                            fast_failures += 1;
+                            if fast_failures >= 20 {
+                                error!(
+                                    "Naukri Lelo audio event handle failing repeatedly, stopping capture"
+                                );
+                                break;
+                            }
+                            // Avoid a hot spin on a genuinely broken handle.
+                            thread::sleep(Duration::from_millis(50));
+                        }
+                        // Otherwise a full-length timeout == silence, which is
+                        // normal: keep the stream alive and wait, no logging.
+                        continue;
                     }
+                    fast_failures = 0;
 
                     let mut temp_queue = VecDeque::new();
                     if let Err(e) = render_client.read_from_device_to_deque(&mut temp_queue) {

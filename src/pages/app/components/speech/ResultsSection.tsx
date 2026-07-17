@@ -1,7 +1,31 @@
 import { ChatConversation } from "@/types";
-import { Markdown, Switch, CopyButton } from "@/components";
-import { BotIcon, HeadphonesIcon, Loader2, SparklesIcon } from "lucide-react";
+import {
+  Button,
+  CopyButton,
+  Markdown,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Slider,
+  Switch,
+} from "@/components";
+import {
+  BotIcon,
+  HeadphonesIcon,
+  Loader2,
+  PauseIcon,
+  PlayIcon,
+  Settings2Icon,
+  SparklesIcon,
+  SquareIcon,
+  Volume2Icon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  useLiveAnswerSpeech,
+  SPEECH_RATE_MIN,
+  SPEECH_RATE_MAX,
+} from "@/hooks";
 
 type Props = {
   lastTranscription: string;
@@ -22,6 +46,7 @@ export const ResultsSection = ({
 }: Props) => {
   const hasResponse = lastAIResponse || isAIProcessing;
   const hasHistory = conversation.messages.length > 2;
+  const speech = useLiveAnswerSpeech(lastAIResponse, isAIProcessing);
 
   if (!hasResponse && !lastTranscription) {
     return null;
@@ -40,7 +65,7 @@ export const ResultsSection = ({
             {conversationMode ? "Conversation" : "AI Response"}
           </h4>
         </div>
-        <div className="flex items-center gap-2 select-none">
+        <div className="flex items-center gap-1 select-none">
           <span className="text-[9px] text-muted-foreground/50 bg-muted/50 px-1 rounded">
             {modKey}+K
           </span>
@@ -49,6 +74,85 @@ export const ResultsSection = ({
             onCheckedChange={setConversationMode}
             className="scale-75"
           />
+          {speech.supported && (
+            <>
+              <Switch
+                checked={speech.enabled}
+                onCheckedChange={speech.setEnabled}
+                className="scale-75"
+                aria-label="Speak completed answers automatically"
+                title="Speak completed answers automatically"
+              />
+              {lastAIResponse && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6"
+                  title={speech.isSpeaking ? "Stop spoken answer" : "Read answer aloud"}
+                  onClick={() =>
+                    speech.isSpeaking ? speech.stop() : speech.speak()
+                  }
+                >
+                  {speech.isSpeaking ? (
+                    <SquareIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <Volume2Icon className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              )}
+              {speech.isSpeaking && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6"
+                  title={speech.isPaused ? "Resume spoken answer" : "Pause spoken answer"}
+                  onClick={speech.togglePause}
+                >
+                  {speech.isPaused ? (
+                    <PlayIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <PauseIcon className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    title="Spoken answer settings"
+                  >
+                    <Settings2Icon className="h-3.5 w-3.5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" side="bottom" className="w-40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Volume2Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Switch
+                      checked={speech.enabled}
+                      onCheckedChange={speech.setEnabled}
+                      aria-label="Speak completed answers automatically"
+                      title="Speak completed answers automatically"
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <Slider
+                      value={[speech.rate]}
+                      min={SPEECH_RATE_MIN}
+                      max={SPEECH_RATE_MAX}
+                      step={0.1}
+                      onValueChange={([rate]) => speech.setRate(rate)}
+                      aria-label="Speech rate"
+                    />
+                    <span className="w-8 text-right text-[10px] text-muted-foreground">
+                      {speech.rate.toFixed(1)}x
+                    </span>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          )}
           {lastAIResponse && <CopyButton content={lastAIResponse} />}
         </div>
       </div>

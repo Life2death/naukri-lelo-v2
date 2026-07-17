@@ -30,6 +30,10 @@ pub struct AudioState {
 pub struct InterviewState {
     pub stream_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub is_capturing: Arc<Mutex<bool>>,
+    // When true, the interview capture loop discards incoming audio. Used to
+    // stop our own spoken-answer (TTS) output — which plays through the same
+    // device loopback captures — from being re-captured and re-transcribed.
+    pub muted: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[tauri::command]
@@ -136,6 +140,7 @@ pub fn run() {
             speaker::start_interview_capture,
             speaker::stop_interview_capture,
             speaker::flush_interview_chunk,
+            speaker::set_interview_muted,
         ])
         .setup(|app| {
             // Non-fatal: if window positioning fails, continue anyway

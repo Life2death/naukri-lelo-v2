@@ -76,9 +76,19 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     name: "Interview Mode - Answer Now",
     description: "Fire the current transcript buffer to the AI for an answer",
     defaultKey: {
-      macos: "cmd+shift+enter",
-      windows: "ctrl+shift+enter",
-      linux: "ctrl+shift+enter",
+      macos: "cmd+capslock",
+      windows: "ctrl+capslock",
+      linux: "ctrl+capslock",
+    },
+  },
+  {
+    id: "speak_answer",
+    name: "Read Answer Aloud",
+    description: "Speak the current AI answer to your headset (toggle)",
+    defaultKey: {
+      macos: "cmd+shift+r",
+      windows: "ctrl+shift+r",
+      linux: "ctrl+shift+r",
     },
   },
 ];

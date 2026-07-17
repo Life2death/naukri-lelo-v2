@@ -592,13 +592,18 @@ pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Interview mode — chunked continuous capture (Work Item A)
+// Interview mode — continuous capture, segmented the same way as auto-detect
+// (VAD) mode, so both modes share one proven capture mechanism. Interview
+// mode differs only in what happens on the frontend with each detected
+// utterance: it's appended to a running transcript buffer instead of being
+// auto-fired to the AI.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CHUNK_MS: u64 = 4000;
-
-/// Start continuous loopback capture for interview mode. No VAD gating — captures
-/// everything. Chunks of ~4s are emitted as `interview-audio-chunk` events.
+/// Start continuous loopback capture for interview mode. Reuses the same
+/// VAD-based speech segmentation as auto-detect mode (reading the shared,
+/// live-tunable `AudioState.vad_config`) — each detected utterance is emitted
+/// as an `interview-audio-chunk` event for the frontend to append to its
+/// running transcript buffer.
 #[tauri::command]
 pub async fn start_interview_capture(
     app: AppHandle,
@@ -628,15 +633,32 @@ pub async fn start_interview_capture(
         return Err(format!("Invalid sample rate: {}. Expected 8000-96000 Hz", sr));
     }
 
+    let mut vad_config = app
+        .state::<crate::AudioState>()
+        .vad_config
+        .lock()
+        .map_err(|e| format!("Failed to read VAD config: {}", e))?
+        .clone();
+
+    // Interview mode wants a snappier transcript than plain auto-detect: cut an
+    // utterance after a shorter trailing silence so text appears sooner. Scale
+    // the shared setting down (with a floor) rather than hard-coding, so the
+    // user's sensitivity tuning still carries through.
+    vad_config.silence_chunks = (vad_config.silence_chunks / 2).max(18);
+
     *state
         .is_capturing
         .lock()
         .map_err(|e| format!("Failed to set capturing state: {}", e))? = true;
 
+    // Start unmuted — a prior session may have left this set.
+    state.muted.store(false, Ordering::Release);
+    let muted = state.muted.clone();
+
     let app_clone = app.clone();
 
     let task = tokio::spawn(async move {
-        run_interview_capture(app_clone.clone(), stream, sr).await;
+        run_interview_capture(app_clone.clone(), stream, sr, vad_config, muted).await;
 
         if let Ok(mut guard) = app_clone.state::<crate::InterviewState>().stream_task.lock() {
             *guard = None;
@@ -685,117 +707,175 @@ pub async fn flush_interview_chunk(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Chunked interview capture loop. Accumulates PCM continuously, emits a ~4s
-/// chunk every CHUNK_MS via `interview-audio-chunk` event. Silent chunks (below
-/// noise_gate_threshold RMS) are skipped.
+/// Mute/unmute interview capture. While muted, incoming audio is discarded so
+/// the app's own spoken-answer (TTS) output — which plays through the same
+/// device that loopback captures — isn't re-captured and re-transcribed.
+#[tauri::command]
+pub fn set_interview_muted(app: AppHandle, muted: bool) -> Result<(), String> {
+    app.state::<crate::InterviewState>()
+        .muted
+        .store(muted, Ordering::Release);
+    Ok(())
+}
+
+/// Interview capture loop. Segments continuous audio into utterances using
+/// the exact same speech/silence detection as `run_vad_capture` (same hop
+/// size, thresholds, pre-speech lookback, and trailing-silence trim), so
+/// this shares the one proven capture mechanism instead of maintaining a
+/// second, separately-timed chunking implementation. Each detected utterance
+/// is emitted as an `interview-audio-chunk` event for the frontend to append
+/// to its running transcript buffer (instead of auto-firing to the AI, which
+/// is what `run_vad_capture`'s equivalent `speech-detected` event triggers).
+///
+/// Also supports an explicit flush (`interview-flush-chunk`, sent by the
+/// "Answer now" action): force-cuts whatever utterance is still in progress
+/// instead of waiting for the natural silence timeout, so the tail end of a
+/// question isn't lost if the user fires right after the interviewer stops
+/// talking.
 async fn run_interview_capture(
     app: AppHandle,
     stream: impl StreamExt<Item = f32> + Unpin,
     sr: u32,
+    config: VadConfig,
+    muted: Arc<AtomicBool>,
 ) {
     let mut stream = stream;
-    let chunk_samples = (sr as u64 * CHUNK_MS / 1000) as usize;
-    let mut accumulator: Vec<f32> = Vec::with_capacity(chunk_samples);
+    let mut buffer: VecDeque<f32> = VecDeque::new();
+    let mut pre_speech: VecDeque<f32> =
+        VecDeque::with_capacity(config.pre_speech_chunks * config.hop_size);
+    let mut speech_buffer: Vec<f32> = Vec::new();
+    let mut in_speech = false;
+    let mut silence_chunks = 0usize;
+    let mut speech_chunks = 0usize;
+    let max_samples = sr as usize * 30; // 30s safety cap per utterance
     let mut seq: u64 = 0;
-    let start = Instant::now();
 
-    // Noise gate threshold — reuse the VAD default value
-    let noise_gate_threshold: f32 = 0.003;
-
-    // Listen for flush event
     let flush_flag = Arc::new(AtomicBool::new(false));
     let flush_flag_listener = flush_flag.clone();
     let _flush_listener = app.listen("interview-flush-chunk", move |_| {
         flush_flag_listener.store(true, Ordering::Release);
     });
 
-    loop {
-        tokio::select! {
-            sample_opt = stream.next() => {
-                match sample_opt {
-                    Some(sample) => {
-                        accumulator.push(sample);
+    let emit_utterance = |app: &AppHandle, seq: &mut u64, speech_buffer: &mut Vec<f32>| {
+        if !speech_buffer.is_empty() {
+            let normalized = normalize_audio_level(speech_buffer, 0.1);
+            if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
+                let _ = app.emit("interview-audio-chunk", serde_json::json!({
+                    "seq": *seq,
+                    "base64": b64
+                }));
+                *seq += 1;
+            }
+        }
+        speech_buffer.clear();
+    };
 
-                        let elapsed = start.elapsed();
-                        let flush_requested = flush_flag.swap(false, Ordering::Acquire);
+    while let Some(sample) = stream.next().await {
+        // While muted (our own TTS answer is playing through the captured
+        // output device), discard audio and reset any in-progress detection
+        // so the spoken answer is never buffered, transcribed, or emitted.
+        if muted.load(Ordering::Acquire) {
+            if in_speech || !speech_buffer.is_empty() {
+                speech_buffer.clear();
+                in_speech = false;
+                silence_chunks = 0;
+                speech_chunks = 0;
+            }
+            pre_speech.clear();
+            buffer.clear();
+            flush_flag.store(false, Ordering::Release);
+            continue;
+        }
 
-                        // Emit chunk every CHUNK_MS or on flush
-                        let time_for_chunk = elapsed.as_millis() as u64 % CHUNK_MS == 0
-                            && !accumulator.is_empty()
-                            && elapsed.as_millis() > 0;
-                        let should_emit = time_for_chunk || flush_requested;
+        buffer.push_back(sample);
 
-                        // Also keep a minimum chunk size (avoid tiny flushes of < ~200ms)
-                        let min_samples = (sr as usize) * 200 / 1000;
-                        let big_enough = accumulator.len() >= min_samples;
-
-                        if should_emit && !accumulator.is_empty() && big_enough {
-                            // Compute RMS
-                            let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
-                            let rms = (sum_sq / accumulator.len() as f32).sqrt();
-
-                            if rms > noise_gate_threshold {
-                                let normalized = normalize_audio_level(&accumulator, 0.1);
-                                if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
-                                    let _ = app.emit("interview-audio-chunk", serde_json::json!({
-                                        "seq": seq,
-                                        "base64": b64
-                                    }));
-                                }
-                            }
-                            // Still increment seq even for silent chunks (gap detection)
-                            seq += 1;
-                            accumulator.clear();
-                        } else if should_emit && !big_enough {
-                            // Chunk too small — skip emit but still increment seq
-                            // so the frontend can detect gaps
-                            seq += 1;
-                            accumulator.clear();
-                        }
-                    }
-                    None => {
-                        warn!("Interview audio stream ended unexpectedly");
-                        // Emit remaining partial chunk
-                        if !accumulator.is_empty() {
-                            let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
-                            let rms = (sum_sq / accumulator.len() as f32).sqrt();
-                            if rms > noise_gate_threshold {
-                                let normalized = normalize_audio_level(&accumulator, 0.1);
-                                if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
-                                    let _ = app.emit("interview-audio-chunk", serde_json::json!({
-                                        "seq": seq,
-                                        "base64": b64
-                                    }));
-                                }
-                            }
-                        }
-                        break;
-                    }
+        while buffer.len() >= config.hop_size {
+            let mut mono = Vec::with_capacity(config.hop_size);
+            for _ in 0..config.hop_size {
+                if let Some(v) = buffer.pop_front() {
+                    mono.push(v);
                 }
             }
-            _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
-                // Time-based chunk emission: check every 10ms whether enough time has passed
-                let elapsed = start.elapsed();
-                let elapsed_ms = elapsed.as_millis() as u64;
-                let chunk_index = elapsed_ms / CHUNK_MS;
-                if chunk_index > seq && !accumulator.is_empty() {
-                    let sum_sq: f32 = accumulator.iter().map(|&s| s * s).sum();
-                    let rms = (sum_sq / accumulator.len() as f32).sqrt();
-                    if rms > noise_gate_threshold {
-                        let normalized = normalize_audio_level(&accumulator, 0.1);
-                        if let Ok(b64) = samples_to_wav_b64(sr, &normalized) {
-                            let _ = app.emit("interview-audio-chunk", serde_json::json!({
-                                "seq": seq,
-                                "base64": b64
-                            }));
-                        }
-                    }
-                    seq = chunk_index;
-                    accumulator.clear();
+
+            let mono = apply_noise_gate(&mono, config.noise_gate_threshold);
+            let (rms, peak) = calculate_audio_metrics(&mono);
+            let is_speech = rms > config.sensitivity_rms || peak > config.peak_threshold;
+
+            if is_speech {
+                if !in_speech {
+                    in_speech = true;
+                    speech_chunks = 0;
+                    speech_buffer.extend(pre_speech.drain(..));
                 }
+
+                speech_chunks += 1;
+                speech_buffer.extend_from_slice(&mono);
+                silence_chunks = 0;
+
+                if speech_buffer.len() > max_samples {
+                    emit_utterance(&app, &mut seq, &mut speech_buffer);
+                    in_speech = false;
+                    speech_chunks = 0;
+                }
+            } else if in_speech {
+                silence_chunks += 1;
+                speech_buffer.extend_from_slice(&mono);
+
+                if silence_chunks >= config.silence_chunks {
+                    if speech_chunks >= config.min_speech_chunks {
+                        let silence_duration_samples = silence_chunks * config.hop_size;
+                        let keep_silence_samples = (sr as usize) * 15 / 100; // 0.15s
+                        let trim_amount =
+                            silence_duration_samples.saturating_sub(keep_silence_samples);
+
+                        if speech_buffer.len() > trim_amount {
+                            speech_buffer.truncate(speech_buffer.len() - trim_amount);
+                        }
+
+                        emit_utterance(&app, &mut seq, &mut speech_buffer);
+                    } else {
+                        speech_buffer.clear();
+                    }
+
+                    in_speech = false;
+                    silence_chunks = 0;
+                    speech_chunks = 0;
+                }
+            } else {
+                pre_speech.extend(mono.into_iter());
+                while pre_speech.len() > config.pre_speech_chunks * config.hop_size {
+                    pre_speech.pop_front();
+                }
+            }
+
+            // "Answer now" flush: force-cut whatever's accumulated so far
+            // instead of waiting for the silence timeout, so the tail of a
+            // question asked right before firing isn't lost.
+            if flush_flag.swap(false, Ordering::Acquire)
+                && in_speech
+                && speech_chunks >= 1
+            {
+                emit_utterance(&app, &mut seq, &mut speech_buffer);
+                in_speech = false;
+                silence_chunks = 0;
+                speech_chunks = 0;
             }
         }
     }
+
+    // The stream ended on its own (device error/unplugged, etc.) rather than
+    // via `stop_interview_capture` — that command aborts this task at the
+    // `.await` above, so this code only runs on an unexpected end. Flush any
+    // in-progress utterance, then tell the frontend so it can clear its
+    // "capturing" indicator instead of showing a stuck-alive green dot.
+    if !speech_buffer.is_empty() {
+        emit_utterance(&app, &mut seq, &mut speech_buffer);
+    }
+
+    if let Ok(mut capturing) = app.state::<crate::InterviewState>().is_capturing.lock() {
+        *capturing = false;
+    }
+    let _ = app.emit("interview-capture-stopped", ());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

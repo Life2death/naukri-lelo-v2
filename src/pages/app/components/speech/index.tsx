@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Button,
   Popover,
@@ -97,6 +97,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
   // View mode toggle
   const [conversationMode, setConversationMode] = useState(false);
   const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+  const modeSwitchInProgressRef = useRef(false);
   const [panelSize, setPanelSize] = useState<OverlayPanelSize>(() =>
     getOverlayPanelSize()
   );
@@ -174,7 +175,25 @@ export const SystemAudio = (props: useSystemAudioType) => {
   const handleModeChange = async (mode: CaptureMode) => {
     if (mode === captureMode || isSwitchingMode) return;
 
+    // Auto-detect ("vad") and Interview share one always-running capture
+    // pipeline. Switching between just those two is a live toggle of
+    // auto-answer — no stop/restart — so the transcript is preserved and a
+    // question missed in Auto-detect can be recovered by flipping to Interview
+    // and firing it.
+    const isLiveMode = (m: CaptureMode) => m === "vad" || m === "interview";
+    if (
+      isLiveMode(mode) &&
+      isLiveMode(captureMode) &&
+      interviewCapturing
+    ) {
+      setCaptureMode(mode);
+      return;
+    }
+
+    modeSwitchInProgressRef.current = true;
     setIsSwitchingMode(true);
+    setIsPopoverOpen(true);
+    resizeWindow(true);
     try {
       if (
         capturing ||
@@ -185,10 +204,14 @@ export const SystemAudio = (props: useSystemAudioType) => {
       }
 
       setCaptureMode(mode);
-      setIsPopoverOpen(true);
-      await resizeWindow(true);
+      await startCapture(mode);
     } finally {
-      setIsSwitchingMode(false);
+      setIsPopoverOpen(true);
+      resizeWindow(true);
+      requestAnimationFrame(() => {
+        modeSwitchInProgressRef.current = false;
+        setIsSwitchingMode(false);
+      });
     }
   };
 
@@ -272,7 +295,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
     <Popover
       open={isPopoverOpen}
       onOpenChange={(open) => {
-        if ((capturing || interviewCapturing) && !open) {
+        if (
+          !open &&
+          (modeSwitchInProgressRef.current ||
+            isSwitchingMode ||
+            capturing ||
+            interviewCapturing)
+        ) {
           return;
         }
         setIsPopoverOpen(open);
@@ -611,8 +640,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                         disabled={
                           !interviewCapturing ||
                           isFireProcessing ||
-                          isAIProcessing ||
-                          !interviewBufferText.trim()
+                          isAIProcessing
                         }
                         size="sm"
                         className="flex-1 gap-1.5"

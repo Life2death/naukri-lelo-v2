@@ -26,6 +26,10 @@ import {
 import { Message } from "@/types/completion";
 import { InterviewProfile } from "@/types";
 import { CaptureMode } from "@/pages/app/components/speech/ModeSwitcher";
+import {
+  LIVE_ANSWER_SPEECH_EVENT,
+  SPEAK_ANSWER_HOTKEY_EVENT,
+} from "./useLiveAnswerSpeech";
 
 // VAD Configuration interface matching Rust
 export interface VadConfig {
@@ -44,6 +48,10 @@ export interface InterviewChunk {
   seq: number;
   text: string;
 }
+
+// Cap on the rolling live-transcript buffer (recent utterances kept as a
+// safety net in auto mode so a missed question can still be fired manually).
+const INTERVIEW_TRANSCRIPT_MAX_CHUNKS = 30;
 
 // OPTIMIZED VAD defaults - matches backend exactly for perfect performance
 const DEFAULT_VAD_CONFIG: VadConfig = {
@@ -142,12 +150,87 @@ export function useSystemAudio() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const interviewBufferTextRef = useRef("");
+  const ignoreTtsAudioUntilRef = useRef(0);
+  const unmuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live mirrors of the selected STT provider so the interview queue reads
+  // the current value instead of a value captured when its listener effect
+  // last ran — avoids a transient "No STT provider configured" flash from a
+  // stale closure at capture start.
+  const selectedSttProviderRef = useRef(selectedSttProvider);
+  const allSttProvidersRef = useRef(allSttProviders);
+  // Auto-detect and Interview share one always-accumulating capture pipeline.
+  // They differ only in whether each captured utterance is auto-answered.
+  const autoAnswerRef = useRef(false);
+  const autoAnswerFireRef = useRef<((question: string) => void) | null>(null);
+
+  // Both Auto-detect ("vad") and Interview use the same continuous,
+  // transcript-accumulating capture pipeline; only auto-answer differs. Manual
+  // (push-to-talk) uses the separate continuous-recording pipeline.
+  const usesInterviewPipeline =
+    captureMode === "vad" || captureMode === "interview";
 
   // Cache the active interview profile's knowledge context, same as useCompletion,
   // so voice-driven answers get the resume/JD context too instead of a bare system prompt.
   const activeProfileRef = useRef<InterviewProfile | null>(null);
   const profileContextRef = useRef<string>("");
   const profileBriefRef = useRef<string>("");
+
+  useEffect(() => {
+    interviewBufferTextRef.current = interviewBufferText;
+  }, [interviewBufferText]);
+
+  useEffect(() => {
+    selectedSttProviderRef.current = selectedSttProvider;
+  }, [selectedSttProvider]);
+
+  useEffect(() => {
+    allSttProvidersRef.current = allSttProviders;
+  }, [allSttProviders]);
+
+  useEffect(() => {
+    autoAnswerRef.current = captureMode === "vad";
+  }, [captureMode]);
+
+  useEffect(() => {
+    // Post-speech drain: keep capture muted a bit after TTS ends so the tail
+    // of the spoken answer, still in the audio pipeline, isn't captured.
+    const TTS_DRAIN_MS = 1200;
+
+    const handleSpeechState = (event: Event) => {
+      const { speaking } = (event as CustomEvent<{ speaking: boolean }>).detail;
+
+      // Belt-and-suspenders gate for the VAD/manual `speech-detected` path.
+      ignoreTtsAudioUntilRef.current = speaking
+        ? Number.MAX_SAFE_INTEGER
+        : Date.now() + TTS_DRAIN_MS + 800;
+
+      // Primary fix: mute interview capture at the Rust source so the spoken
+      // answer never enters the pipeline.
+      if (unmuteTimerRef.current) {
+        clearTimeout(unmuteTimerRef.current);
+        unmuteTimerRef.current = null;
+      }
+
+      if (speaking) {
+        invoke("set_interview_muted", { muted: true }).catch(() => {});
+      } else {
+        unmuteTimerRef.current = setTimeout(() => {
+          unmuteTimerRef.current = null;
+          invoke("set_interview_muted", { muted: false }).catch(() => {});
+        }, TTS_DRAIN_MS);
+      }
+    };
+
+    window.addEventListener(LIVE_ANSWER_SPEECH_EVENT, handleSpeechState);
+    return () => {
+      window.removeEventListener(LIVE_ANSWER_SPEECH_EVENT, handleSpeechState);
+      if (unmuteTimerRef.current) {
+        clearTimeout(unmuteTimerRef.current);
+        unmuteTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeProfileId) {
@@ -248,15 +331,20 @@ export function useSystemAudio() {
     }
   }, []);
 
-  // Persist captureMode changes
+  // Persist captureMode changes. vadConfig itself is synced and pushed to the
+  // backend by startCapture(mode), which every caller of this invokes right
+  // after — doing it here too would push the config to Rust twice per switch.
   const handleCaptureModeChange = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);
     safeLocalStorage.setItem(STORAGE_KEYS.CAPTURE_MODE, mode);
   }, []);
 
-  // Interview mode: listen for audio chunk events and process them
+  // Live capture (Auto-detect + Interview): listen for audio chunk events and
+  // process them. Gated on usesInterviewPipeline (a stable boolean) so toggling
+  // between vad and interview does NOT tear down and re-register the listeners
+  // — capture keeps running and the transcript is preserved across the switch.
   useEffect(() => {
-    if (captureMode !== "interview") return;
+    if (!usesInterviewPipeline) return;
 
     let unlistenChunk: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
@@ -265,6 +353,8 @@ export function useSystemAudio() {
     const setupListeners = async () => {
       try {
         unlistenChunk = await listen("interview-audio-chunk", (event) => {
+          if (Date.now() < ignoreTtsAudioUntilRef.current) return;
+
           const payload = event.payload as { seq: number; base64: string };
           if (!payload?.base64) return;
 
@@ -313,13 +403,18 @@ export function useSystemAudio() {
           }
           const audioBlob = new Blob([bytes], { type: "audio/wav" });
 
-          if (!selectedSttProvider.provider) {
+          const activeSttProvider = selectedSttProviderRef.current;
+          if (!activeSttProvider.provider) {
             setSttQueueWarning("No STT provider configured");
-            return;
+            setInterviewChunks((prev) => [
+              ...prev,
+              { seq: item.seq, text: "[unclear]" },
+            ]);
+            continue;
           }
 
-          const providerConfig = allSttProviders.find(
-            (p) => p.id === selectedSttProvider.provider
+          const providerConfig = allSttProvidersRef.current.find(
+            (p) => p.id === activeSttProvider.provider
           );
           if (!providerConfig) {
             setSttQueueWarning("STT provider config not found");
@@ -334,7 +429,7 @@ export function useSystemAudio() {
           try {
             transcription = await fetchSTT({
               provider: providerConfig,
-              selectedProvider: selectedSttProvider,
+              selectedProvider: activeSttProvider,
               audio: audioBlob,
             });
           } catch {
@@ -357,13 +452,27 @@ export function useSystemAudio() {
             continue;
           }
 
+          const utteranceText = transcription.trim();
           setInterviewChunks((prev) => {
-            const updated = [...prev, { seq: item.seq, text: transcription.trim() }];
-            // Update buffer text: ordered concatenation
-            const ordered = updated.sort((a, b) => a.seq - b.seq);
-            setInterviewBufferText(ordered.map((c) => c.text).join(" "));
-            return updated;
+            const updated = [...prev, { seq: item.seq, text: utteranceText }];
+            // Ordered concatenation, capped to recent utterances so the
+            // rolling transcript (kept as a safety net in auto mode) can't
+            // grow without bound.
+            const ordered = updated
+              .sort((a, b) => a.seq - b.seq)
+              .slice(-INTERVIEW_TRANSCRIPT_MAX_CHUNKS);
+            const nextText = ordered.map((c) => c.text).join(" ");
+            interviewBufferTextRef.current = nextText;
+            setInterviewBufferText(nextText);
+            return ordered;
           });
+
+          // Auto-detect mode: answer each captured utterance immediately,
+          // without clearing the transcript buffer (so a missed/mis-fired
+          // question is still recoverable by switching to Interview mode).
+          if (autoAnswerRef.current) {
+            autoAnswerFireRef.current?.(utteranceText);
+          }
 
           processingCount = Math.max(0, processingCount - 1);
           if (processingCount <= 2) {
@@ -387,7 +496,10 @@ export function useSystemAudio() {
       if (unlistenError) unlistenError();
       if (unlistenStopped) unlistenStopped();
     };
-  }, [captureMode, selectedSttProvider, allSttProviders]);
+    // Provider is read live via refs inside the queue, and auto-answer is read
+    // via autoAnswerRef, so this effect only re-registers when the pipeline
+    // itself turns on/off — not on provider edits or vad<->interview toggles.
+  }, [usesInterviewPipeline]);
 
   // Handle continuous recording progress events AND error events
   useEffect(() => {
@@ -458,6 +570,7 @@ export function useSystemAudio() {
         speechUnlisten = await listen("speech-detected", async (event) => {
           try {
             if (!capturing) return;
+            if (Date.now() < ignoreTtsAudioUntilRef.current) return;
 
             const base64Audio = event.payload as string;
             // Convert to blob
@@ -525,7 +638,11 @@ export function useSystemAudio() {
               }
             } catch (sttError: any) {
               console.error("STT Error:", sttError);
-              setError(sttError.message || "Failed to transcribe audio");
+              setError(
+                `STT (${selectedSttProvider.provider}): ${
+                  sttError.message || "Failed to transcribe audio"
+                }`
+              );
               setIsPopoverOpen(true);
             }
           } catch (err) {
@@ -858,7 +975,11 @@ export function useSystemAudio() {
             setLastAIResponse((prev) => prev + chunk);
           }
         } catch (aiError: any) {
-          setError(aiError.message || "Failed to get AI response");
+          setError(
+            `AI (${selectedAIProvider.provider}): ${
+              aiError.message || "Failed to get AI response"
+            }`
+          );
         }
 
         if (fullResponse) {
@@ -894,21 +1015,28 @@ export function useSystemAudio() {
     [selectedAIProvider, allAiProviders, conversation.messages]
   );
 
-  /** Fire the interview transcript buffer: flush chunk, assemble, call AI. */
+  /** Fire the interview transcript buffer: flush chunk, assemble, call AI.
+   * Works in both Auto-detect and Interview (the shared live pipeline); it's a
+   * no-op for manual push-to-talk. */
   const fireInterviewBuffer = useCallback(async () => {
-    if (captureMode !== "interview") return;
+    if (captureMode === "manual") return;
     if (isFireProcessing || isAIProcessing) return;
 
-    // Check if there's anything in the buffer
-    if (!interviewBufferText.trim()) {
-      setError("Nothing captured yet");
-      return;
-    }
-
+    // Don't bail out on an empty buffer yet — the tail of the question may
+    // still be sitting unflushed in Rust (e.g. fired right as the
+    // interviewer stops talking, before the silence timeout would have cut
+    // it). Flush first, then check.
     setIsFireProcessing(true);
     setError("");
 
     try {
+      // Snapshot what's already transcribed before flushing. If the question
+      // is already captured (the common case — the user waits to see the
+      // transcript before firing), we only need a short wait to pick up any
+      // small trailing bit. Only when the buffer is still empty do we wait
+      // longer for the flushed tail utterance to transcribe.
+      const bufferBeforeFlush = interviewBufferTextRef.current.trim();
+
       // Step 1: flush the current partial chunk from Rust
       try {
         await invoke("flush_interview_chunk");
@@ -916,11 +1044,22 @@ export function useSystemAudio() {
         // Non-fatal — continue with what we have
       }
 
-      // Step 2: wait briefly for the flush chunk's transcription to arrive
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Step 2: wait for the flushed chunk's transcription to land. Poll so we
+      // proceed as soon as new text arrives instead of always burning a fixed
+      // delay.
+      const maxWaitMs = bufferBeforeFlush ? 500 : 1500;
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < maxWaitMs) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const current = interviewBufferTextRef.current.trim();
+        // New text landed beyond what we had before flushing → good to go.
+        if (current.length > bufferBeforeFlush.length) break;
+        // Already had content and nothing new after a short grace → go.
+        if (bufferBeforeFlush && Date.now() - pollStart >= 300) break;
+      }
 
       // Step 3: gather latest buffer text
-      const questionText = interviewBufferText.trim();
+      const questionText = interviewBufferTextRef.current.trim();
       if (!questionText) {
         setError("Nothing captured yet");
         setIsFireProcessing(false);
@@ -929,6 +1068,7 @@ export function useSystemAudio() {
 
       // Step 4: clear the buffer immediately
       setInterviewChunks([]);
+      interviewBufferTextRef.current = "";
       setInterviewBufferText("");
 
       // Step 5: set lastTranscription (keeps regenerate() working)
@@ -954,7 +1094,6 @@ export function useSystemAudio() {
     }
   }, [
     captureMode,
-    interviewBufferText,
     isFireProcessing,
     isAIProcessing,
     buildEffectiveSystemPrompt,
@@ -965,15 +1104,52 @@ export function useSystemAudio() {
   /** Clear the interview transcript buffer without firing. */
   const clearInterviewBuffer = useCallback(() => {
     setInterviewChunks([]);
+    interviewBufferTextRef.current = "";
     setInterviewBufferText("");
     setSttQueueWarning("");
   }, []);
 
-  const startCapture = useCallback(async () => {
+  /** Auto-detect mode: answer a single captured utterance immediately. Unlike
+   * fireInterviewBuffer this does NOT touch the transcript buffer, so the
+   * rolling transcript stays intact as a recover-by-switching-to-Interview
+   * safety net. */
+  const autoAnswerQuestion = useCallback(
+    async (question: string) => {
+      if (!question.trim() || isAIProcessing) return;
+      try {
+        const effectivePrompt = buildEffectiveSystemPrompt();
+        const previousMessages = conversation.messages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+        setLastTranscription(question);
+        await processWithAI(
+          question,
+          effectivePrompt.text,
+          previousMessages,
+          effectivePrompt.segments
+        );
+      } catch (err: any) {
+        setError(err.message || "Failed to auto-answer");
+      }
+    },
+    [isAIProcessing, buildEffectiveSystemPrompt, conversation.messages, processWithAI]
+  );
+
+  useEffect(() => {
+    autoAnswerFireRef.current = (question: string) => {
+      void autoAnswerQuestion(question);
+    };
+  }, [autoAnswerQuestion]);
+
+  const startCapture = useCallback(async (mode: CaptureMode = captureMode) => {
     try {
       setError("");
 
-      if (captureMode === "interview") {
+      // Both Auto-detect ("vad") and Interview use the continuous,
+      // transcript-accumulating capture pipeline. They differ only in whether
+      // each utterance is auto-answered (handled in the chunk queue).
+      if (mode === "interview" || mode === "vad") {
         // Start interview capture
         const hasAccess = await invoke<boolean>("check_system_audio_access");
         if (!hasAccess) {
@@ -988,6 +1164,7 @@ export function useSystemAudio() {
             : null;
 
         setInterviewChunks([]);
+        interviewBufferTextRef.current = "";
         setInterviewBufferText("");
         setSttQueueWarning("");
         setInterviewCapturing(true);
@@ -1006,7 +1183,21 @@ export function useSystemAudio() {
         return;
       }
 
-      const isContinuous = !vadConfig.enabled;
+      // Only manual (push-to-talk) reaches here — vad/interview returned above
+      // via the shared live pipeline. Manual uses continuous capture with VAD
+      // gating disabled.
+      const isContinuous = true;
+      const captureVadConfig = {
+        ...vadConfig,
+        enabled: false,
+      };
+      if (captureVadConfig.enabled !== vadConfig.enabled) {
+        setVadConfig(captureVadConfig);
+        safeLocalStorage.setItem(
+          "vad_config",
+          JSON.stringify(captureVadConfig)
+        );
+      }
 
       // Set up conversation
       const conversationId = generateConversationId("sysaudio");
@@ -1040,7 +1231,7 @@ export function useSystemAudio() {
 
       // Start capture with VAD config
       await invoke<string>("start_system_audio_capture", {
-        vadConfig: vadConfig,
+        vadConfig: captureVadConfig,
         deviceId: deviceId,
       });
     } catch (err) {
@@ -1048,7 +1239,7 @@ export function useSystemAudio() {
       setError(errorMessage);
       setIsPopoverOpen(true);
     }
-  }, [vadConfig, selectedAudioDevices.output.id]);
+  }, [captureMode, vadConfig, selectedAudioDevices.output.id]);
 
   const stopCapture = useCallback(async (keepPopoverOpen = false) => {
     try {
@@ -1058,8 +1249,8 @@ export function useSystemAudio() {
         abortControllerRef.current = null;
       }
 
-      if (captureMode === "interview") {
-        // Stop interview capture
+      if (captureMode === "interview" || captureMode === "vad") {
+        // Stop the shared live-capture pipeline
         try {
           await invoke<string>("stop_interview_capture");
         } catch {
@@ -1067,10 +1258,11 @@ export function useSystemAudio() {
         }
         setInterviewCapturing(false);
         setInterviewChunks([]);
+        interviewBufferTextRef.current = "";
         setInterviewBufferText("");
         setSttQueueWarning("");
       } else {
-        // Stop the audio capture
+        // Stop the manual (push-to-talk) capture
         await invoke<string>("stop_system_audio_capture");
       }
 
@@ -1154,33 +1346,69 @@ export function useSystemAudio() {
     }
   }, [
     capturing,
+    interviewCapturing,
     setupRequired,
     isAIProcessing,
+    isFireProcessing,
     lastAIResponse,
     error,
+    captureMode,
+    interviewBufferText,
     resizeWindow,
   ]);
 
+  // Global hotkey callbacks are registered into a module-level Map (see
+  // useGlobalShortcuts) that's read the instant the OS reports a keypress.
+  // If the registration effect re-runs on every render (which it did before
+  // useGlobalShortcuts's return value and these callbacks were stabilized),
+  // there's a real tear-down/re-register gap where a press lands on nobody —
+  // the "hotkey works sometimes" symptom. Routing the volatile parts through
+  // refs means these effects register once and stay registered.
+  const captureToggleRef = useRef<() => void>(() => {});
   useEffect(() => {
-    globalShortcuts.registerSystemAudioCallback(async () => {
-      if (capturing) {
-        await stopCapture();
+    captureToggleRef.current = () => {
+      if (capturing || interviewCapturing) {
+        stopCapture();
       } else {
-        await startCapture();
+        startCapture();
       }
-    });
-  }, [startCapture, stopCapture]);
+    };
+  }, [capturing, interviewCapturing, startCapture, stopCapture]);
 
-  // Register interview_fire custom shortcut
   useEffect(() => {
-    if (captureMode !== "interview") return;
+    globalShortcuts.registerSystemAudioCallback(() => {
+      captureToggleRef.current();
+    });
+  }, [globalShortcuts]);
+
+  const fireInterviewBufferRef = useRef(fireInterviewBuffer);
+  useEffect(() => {
+    fireInterviewBufferRef.current = fireInterviewBuffer;
+  }, [fireInterviewBuffer]);
+
+  // Register interview_fire custom shortcut (works in both live modes)
+  useEffect(() => {
+    if (!usesInterviewPipeline) return;
     globalShortcuts.registerCustomShortcutCallback("interview_fire", () => {
-      fireInterviewBuffer();
+      fireInterviewBufferRef.current();
     });
     return () => {
       globalShortcuts.unregisterCustomShortcutCallback("interview_fire");
     };
-  }, [captureMode, fireInterviewBuffer, globalShortcuts]);
+  }, [usesInterviewPipeline, globalShortcuts]);
+
+  // Register speak_answer custom shortcut: read the current AI answer aloud on
+  // demand. Kept as a manual hotkey (rather than auto-speak) so the spoken
+  // answer only plays when the user knows the interviewer has finished — the
+  // app can't both speak and hear a new question through the same device.
+  useEffect(() => {
+    globalShortcuts.registerCustomShortcutCallback("speak_answer", () => {
+      window.dispatchEvent(new CustomEvent(SPEAK_ANSWER_HOTKEY_EVENT));
+    });
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback("speak_answer");
+    };
+  }, [globalShortcuts]);
 
   useEffect(() => {
     return () => {
