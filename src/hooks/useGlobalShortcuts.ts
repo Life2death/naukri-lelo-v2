@@ -3,6 +3,18 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getShortcutsConfig } from "@/lib";
 
+// Guards setupEventListeners below against running more than once per app
+// lifetime. The listener registrations don't depend on component state (they
+// only touch the module-level globals below), so once set up they never need
+// to run again — critical because React 19 StrictMode double-invokes effects
+// in dev, and the previous "check existing listener, then async re-register"
+// approach raced: both invocations passed the check before either finished
+// registering, producing two live Tauri subscriptions for the same event and
+// double-firing every hotkey callback. This flag is set synchronously before
+// any `await`, so it's safe even though the two invocations happen back to
+// back — JS has no true concurrency, so the second always sees it as true.
+let hasSetupEventListeners = false;
+
 // Global singleton to prevent multiple event listeners in StrictMode
 let globalEventListeners: {
   focus?: UnlistenFn;
@@ -11,6 +23,8 @@ let globalEventListeners: {
   systemAudio?: UnlistenFn;
   customShortcut?: UnlistenFn;
   registrationError?: UnlistenFn;
+  readAnswerKeyDown?: UnlistenFn;
+  readAnswerKeyUp?: UnlistenFn;
 } = {};
 
 // Global debounce for screenshot events to prevent duplicates
@@ -22,6 +36,8 @@ let globalAudioCallback: (() => void) | null = null;
 let globalScreenshotCallback: (() => void | Promise<void>) | null = null;
 let globalSystemAudioCallback: (() => void) | null = null;
 let globalCustomShortcutCallbacks: Map<string, () => void> = new Map();
+let globalReadAnswerKeyDownCallback: (() => void) | null = null;
+let globalReadAnswerKeyUpCallback: (() => void) | null = null;
 
 export const useGlobalShortcuts = () => {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -108,8 +124,25 @@ export const useGlobalShortcuts = () => {
     globalCustomShortcutCallbacks.delete(actionId);
   }, []);
 
-  // Setup event listeners using global singleton
+  // Register hold-to-read-answer key-down/key-up callbacks. These are
+  // separate Tauri events (not routed through the generic custom-shortcut
+  // path) because that path only ever fires on key press, never release.
+  const registerReadAnswerKeyDownCallback = useCallback((callback: () => void) => {
+    globalReadAnswerKeyDownCallback = callback;
+  }, []);
+
+  const registerReadAnswerKeyUpCallback = useCallback((callback: () => void) => {
+    globalReadAnswerKeyUpCallback = callback;
+  }, []);
+
+  // Setup event listeners using global singleton. Guarded by
+  // hasSetupEventListeners so this body — and every listen() call inside it —
+  // runs at most once per app lifetime, no matter how many times this effect
+  // re-fires (StrictMode double-invoke, multiple mounted consumers, etc.).
   useEffect(() => {
+    if (hasSetupEventListeners) return;
+    hasSetupEventListeners = true;
+
     const setupEventListeners = async () => {
       try {
         // Clean up any existing global listeners first
@@ -156,6 +189,20 @@ export const useGlobalShortcuts = () => {
               "Error cleaning up shortcut registration error listener:",
               error
             );
+          }
+        }
+        if (globalEventListeners.readAnswerKeyDown) {
+          try {
+            globalEventListeners.readAnswerKeyDown();
+          } catch (error) {
+            console.warn("Error cleaning up read-answer key-down listener:", error);
+          }
+        }
+        if (globalEventListeners.readAnswerKeyUp) {
+          try {
+            globalEventListeners.readAnswerKeyUp();
+          } catch (error) {
+            console.warn("Error cleaning up read-answer key-up listener:", error);
           }
         }
 
@@ -247,6 +294,17 @@ export const useGlobalShortcuts = () => {
           );
         });
         globalEventListeners.registrationError = unlistenRegistrationError;
+
+        // Listen for the hold-to-read-answer key down/up events
+        const unlistenReadAnswerKeyDown = await listen("read-answer-key-down", () => {
+          globalReadAnswerKeyDownCallback?.();
+        });
+        globalEventListeners.readAnswerKeyDown = unlistenReadAnswerKeyDown;
+
+        const unlistenReadAnswerKeyUp = await listen("read-answer-key-up", () => {
+          globalReadAnswerKeyUpCallback?.();
+        });
+        globalEventListeners.readAnswerKeyUp = unlistenReadAnswerKeyUp;
       } catch (error) {
         console.error("Failed to setup event listeners:", error);
       }
@@ -272,6 +330,8 @@ export const useGlobalShortcuts = () => {
       registerSystemAudioCallback,
       registerCustomShortcutCallback,
       unregisterCustomShortcutCallback,
+      registerReadAnswerKeyDownCallback,
+      registerReadAnswerKeyUpCallback,
     }),
     [
       checkShortcutsRegistered,
@@ -283,6 +343,8 @@ export const useGlobalShortcuts = () => {
       registerSystemAudioCallback,
       registerCustomShortcutCallback,
       unregisterCustomShortcutCallback,
+      registerReadAnswerKeyDownCallback,
+      registerReadAnswerKeyUpCallback,
     ]
   );
 };

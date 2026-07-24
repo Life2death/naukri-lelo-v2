@@ -91,4 +91,15 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
       linux: "ctrl+shift+r",
     },
   },
+  {
+    id: "hold_to_read_answer",
+    name: "Hold to Read Answer",
+    description:
+      "Hold to read the current AI answer aloud; release to pause. Resumes right where you left off, or restarts from the beginning when a new answer arrives.",
+    defaultKey: {
+      macos: "capslock",
+      windows: "insert",
+      linux: "insert",
+    },
+  },
 ];

@@ -1,5 +1,23 @@
+import { emit } from "@tauri-apps/api/event";
 import { estimateTokens } from "./token-estimate";
 import { STORAGE_KEYS } from "@/config/constants";
+
+// Cross-window broadcast for new/updated captures. Storage events don't
+// reliably cross separate Tauri/WebView2 windows in this app (the overlay,
+// where all real captures happen, and the Dashboard's Dev Space, where the
+// inspector lives, are different windows) — theme.context.tsx hit the same
+// issue and already solved it with emit/listen instead of storage events.
+export const PROMPT_CAPTURE_EVENT = "prompt-capture-updated";
+
+// Wraps emit() in Promise.resolve() before chaining .catch() — needed because
+// the test mock for emit() returns undefined rather than a real Promise.
+function safeEmitCapture(entry: PromptCaptureEntry): void {
+  try {
+    Promise.resolve(emit(PROMPT_CAPTURE_EVENT, entry)).catch(() => {});
+  } catch {
+    // ignore — e.g. running outside a Tauri webview in tests
+  }
+}
 
 export interface PromptCaptureSegment {
   name: string;
@@ -102,12 +120,16 @@ export function recordPromptCapture(entry: Omit<PromptCaptureEntry, "id" | "time
   for (const cb of listeners) {
     try { cb(full); } catch { /* ignore listener errors */ }
   }
+
+  safeEmitCapture(full);
 }
 
 export function notifyUsageUpdate(entry: PromptCaptureEntry): void {
   for (const cb of listeners) {
     try { cb(entry); } catch { /* ignore listener errors */ }
   }
+
+  safeEmitCapture(entry);
 }
 
 export function getPromptCaptures(): PromptCaptureEntry[] {

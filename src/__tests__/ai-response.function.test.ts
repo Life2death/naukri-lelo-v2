@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchAIResponse, buildEnhancedSystemPrompt } from "@/lib/functions/ai-response.function";
+import {
+  fetchAIResponse,
+  buildEnhancedSystemPrompt,
+  LENGTH_RULE_PRECEDENCE_CLAUSE,
+} from "@/lib/functions/ai-response.function";
 import type { TYPE_PROVIDER } from "@/types";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -349,13 +353,17 @@ describe("buildEnhancedSystemPrompt", () => {
   });
 
   it("text is byte-identical to the old string output for same inputs", () => {
-    // The authoritative text is: baseSystemPrompt + lengthRule + language + markdown
+    // The authoritative text is: baseSystemPrompt + lengthRule + precedenceClause + language + markdown
     // With mock data: lengthRule="Medium prompt.", language omitted (en), MARKDOWN=""
     const withBase = buildEnhancedSystemPrompt("Hello");
-    expect(withBase.text).toBe("Hello Medium prompt. ");
+    expect(withBase.text).toBe(
+      `Hello Medium prompt. ${LENGTH_RULE_PRECEDENCE_CLAUSE} `
+    );
 
     const withoutBase = buildEnhancedSystemPrompt();
-    expect(withoutBase.text).toBe("Medium prompt. ");
+    expect(withoutBase.text).toBe(
+      `Medium prompt. ${LENGTH_RULE_PRECEDENCE_CLAUSE} `
+    );
   });
 
   it("responseLengthOverride beats getResponseSettings (Phase F)", () => {

@@ -229,6 +229,7 @@ pub fn run() {
             if let Err(e) = app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |app, shortcut, event| {
+                        use tauri::Emitter;
                         use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
                         let action_id = {
@@ -258,6 +259,10 @@ pub fn run() {
                                         action_id.strip_prefix("move_window_")
                                     {
                                         shortcuts::start_move_window(app, direction);
+                                    } else if action_id == "hold_to_read_answer" {
+                                        if let Some(window) = app.get_webview_window("main") {
+                                            let _ = window.emit("read-answer-key-down", ());
+                                        }
                                     } else {
                                         eprintln!("Shortcut triggered: {}", action_id);
                                         shortcuts::handle_shortcut_action(app, &action_id);
@@ -268,6 +273,10 @@ pub fn run() {
                                         action_id.strip_prefix("move_window_")
                                     {
                                         shortcuts::stop_move_window(app, direction);
+                                    } else if action_id == "hold_to_read_answer" {
+                                        if let Some(window) = app.get_webview_window("main") {
+                                            let _ = window.emit("read-answer-key-up", ());
+                                        }
                                     }
                                 }
                             }

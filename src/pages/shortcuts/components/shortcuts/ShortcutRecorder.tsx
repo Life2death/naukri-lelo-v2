@@ -8,6 +8,33 @@ import {
 } from "@/lib";
 import { invoke } from "@tauri-apps/api/core";
 
+// Keys the underlying global-shortcut backend can register standalone, with
+// no modifier attached. Ctrl/Alt/Shift/Cmd are intentionally excluded — the
+// backend only ever accepts those as a prefix on a real key, never alone.
+const HOLDABLE_KEYS = [
+  "space",
+  "capslock",
+  "insert",
+  "home",
+  "end",
+  "pageup",
+  "pagedown",
+  "scrolllock",
+  "pause",
+  "f13",
+  "f14",
+  "f15",
+  "f16",
+  "f17",
+  "f18",
+  "f19",
+  "f20",
+  "f21",
+  "f22",
+  "f23",
+  "f24",
+];
+
 interface ShortcutRecorderProps {
   onSave: (key: string) => void;
   onCancel: () => void;
@@ -25,7 +52,12 @@ export const ShortcutRecorder = ({
   const [error, setError] = useState<string>("");
   const isRecording = true; // Always recording
   const isMoveWindow = actionId === "move_window";
-  const minKeys = isMoveWindow ? 1 : 2;
+  // Hold-to-read (and any future hold-style action) binds to a single
+  // standalone key with no modifier — the global-shortcut backend can't
+  // register Ctrl/Alt/Shift/Cmd alone as a hotkey, only as a prefix on a
+  // real key, so these must be one of the keys that ARE valid stand-alone.
+  const isHoldKey = actionId === "hold_to_read_answer";
+  const minKeys = isMoveWindow || isHoldKey ? 1 : 2;
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -33,6 +65,19 @@ export const ShortcutRecorder = ({
 
       e.preventDefault();
       e.stopPropagation();
+
+      if (isHoldKey) {
+        const mainKey = e.key === " " ? "space" : e.key.toLowerCase();
+        if (HOLDABLE_KEYS.includes(mainKey)) {
+          setRecordedKeys([mainKey]);
+          setError("");
+        } else {
+          setError(
+            "Choose a standalone key: Space, CapsLock, Insert, Home, End, Page Up/Down, Scroll Lock, Pause, or F13–F24. Modifier combos aren't supported for hold-to-read."
+          );
+        }
+        return;
+      }
 
       const keys: string[] = [];
 
@@ -104,7 +149,7 @@ export const ShortcutRecorder = ({
         }
       }
     },
-    [isRecording, isMoveWindow]
+    [isRecording, isMoveWindow, isHoldKey]
   );
 
   const handleKeyUp = useCallback(
@@ -136,7 +181,9 @@ export const ShortcutRecorder = ({
       setError(
         isMoveWindow
           ? "Move Window needs at least one modifier"
-          : "Shortcut must have at least one modifier and one key"
+          : isHoldKey
+            ? "Choose a standalone key (see hint below)"
+            : "Shortcut must have at least one modifier and one key"
       );
       return;
     }
@@ -145,8 +192,9 @@ export const ShortcutRecorder = ({
 
     // For move_window, skip validation as we'll add arrow keys in the backend
     if (!isMoveWindow) {
-      // Validate with frontend
-      if (!validateShortcutKey(shortcutKey)) {
+      // Frontend's modifier+key validator doesn't know about standalone hold
+      // keys, so hold-key bindings skip straight to backend validation.
+      if (!isHoldKey && !validateShortcutKey(shortcutKey)) {
         setError("Invalid shortcut combination");
         return;
       }
@@ -224,7 +272,9 @@ export const ShortcutRecorder = ({
         <p className="text-xs text-muted-foreground">
           {isMoveWindow
             ? "Press modifier keys (e.g., Cmd+Shift). Arrow keys work automatically."
-            : "Press a key combination now (e.g., Cmd+Shift+K)"}
+            : isHoldKey
+              ? "Press one standalone key to hold: Space, CapsLock, Insert, Home, End, Page Up/Down, Scroll Lock, Pause, or F13–F24."
+              : "Press a key combination now (e.g., Cmd+Shift+K)"}
         </p>
       )}
 

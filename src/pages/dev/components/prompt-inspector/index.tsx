@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components";
 import { BugIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import {
@@ -7,8 +8,20 @@ import {
   getPromptCaptures,
   getLastPromptCapture,
   subscribe,
+  PROMPT_CAPTURE_EVENT,
   type PromptCaptureEntry,
 } from "@/lib/debug/prompt-capture";
+
+const upsertCapture = (
+  prev: PromptCaptureEntry[],
+  incoming: PromptCaptureEntry
+): PromptCaptureEntry[] => {
+  const idx = prev.findIndex((c) => c.id === incoming.id);
+  if (idx === -1) return [...prev, incoming];
+  const next = [...prev];
+  next[idx] = incoming;
+  return next;
+};
 import { estimateTokens } from "@/lib/debug/token-estimate";
 
 function SegmentBar({ label, chars, totalChars }: { label: string; chars: number; totalChars: number }) {
@@ -98,21 +111,28 @@ export const PromptInspector = () => {
     return unsub;
   }, []);
 
-  // Listen for cross-window storage events (dashboard reads overlay captures)
+  // Backfill whatever was last captured before this inspector mounted (e.g.
+  // opened after a VAD/Interview answer already happened in the overlay).
   useEffect(() => {
-    const handler = (e: StorageEvent) => {
-      if (e.key === "prompt_capture_last" && e.newValue) {
-        const stored = getLastPromptCapture();
-        if (stored) {
-          setCaptures((prev) => {
-            const exists = prev.some((c) => c.id === stored.id);
-            return exists ? prev : [...prev, stored];
-          });
-        }
+    const stored = getLastPromptCapture();
+    if (stored) {
+      setCaptures((prev) => upsertCapture(prev, stored));
+    }
+  }, []);
+
+  // Listen for cross-window capture events (the overlay, where VAD/Interview/
+  // audio answers actually happen, is a separate window from the Dashboard's
+  // Dev Space where this inspector lives).
+  useEffect(() => {
+    const unlistenPromise = listen<PromptCaptureEntry>(
+      PROMPT_CAPTURE_EVENT,
+      (event) => {
+        setCaptures((prev) => upsertCapture(prev, event.payload));
       }
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
     };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
   }, []);
 
   const handleToggle = useCallback(() => {

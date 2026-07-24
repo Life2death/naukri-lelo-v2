@@ -5,6 +5,9 @@ import { safeLocalStorage } from "@/lib/storage";
 export const LIVE_ANSWER_SPEECH_EVENT = "live-answer-speech-state";
 // Fired by the global speak-answer hotkey to toggle reading the current answer.
 export const SPEAK_ANSWER_HOTKEY_EVENT = "speak-answer-hotkey";
+// Fired by the global hold-to-read-answer hotkey on physical key down/up.
+export const READ_ANSWER_HOLD_DOWN_EVENT = "read-answer-hold-down";
+export const READ_ANSWER_HOLD_UP_EVENT = "read-answer-hold-up";
 
 type SpeechSettings = {
   enabled: boolean;
@@ -57,6 +60,11 @@ export const useLiveAnswerSpeech = (
   const requestIdRef = useRef(0);
   const lastAutoSpokenRef = useRef("");
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which answer text the current hold-to-read utterance belongs to. A fresh
+  // answer (this ref stale) means the next key-down must start from the
+  // beginning rather than resume — a paused utterance is never resumed
+  // across two different answers.
+  const heldAnswerRef = useRef("");
 
   const announceSpeechState = useCallback((speaking: boolean) => {
     window.dispatchEvent(
@@ -147,6 +155,47 @@ export const useLiveAnswerSpeech = (
     }
   }, [isSpeaking, supported]);
 
+  // Key-down for the hold-to-read hotkey: start fresh on a new answer,
+  // resume in place on the same answer, or no-op if OS key-repeat re-fires
+  // while already playing.
+  const playHeld = useCallback(() => {
+    if (!supported || isGenerating || !answer.trim()) return;
+
+    const synth = window.speechSynthesis;
+    const sameAnswer = heldAnswerRef.current === answer;
+
+    if (sameAnswer && synth.speaking && !synth.paused) return;
+
+    if (sameAnswer && synth.speaking && synth.paused) {
+      clearWatchdog();
+      synth.resume();
+      setIsPaused(false);
+      const spokenText = cleanForSpeech(answer);
+      const estimatedSpeechMs = (spokenText.length / 15 / settings.rate) * 1000;
+      const watchdogMs = Math.min(Math.max(estimatedSpeechMs * 3, 15000), 120000);
+      const requestId = requestIdRef.current;
+      watchdogRef.current = setTimeout(() => {
+        if (requestId === requestIdRef.current) stop();
+      }, watchdogMs);
+      return;
+    }
+
+    heldAnswerRef.current = answer;
+    speak(answer);
+  }, [answer, isGenerating, settings.rate, speak, stop, supported]);
+
+  // Key-up for the hold-to-read hotkey: pause in place (never cancel) so the
+  // next key-down can resume from this exact position.
+  const pauseHeld = useCallback(() => {
+    if (!supported) return;
+    const synth = window.speechSynthesis;
+    if (synth.speaking && !synth.paused) {
+      clearWatchdog();
+      synth.pause();
+      setIsPaused(true);
+    }
+  }, [supported]);
+
   const setEnabled = useCallback(
     (enabled: boolean) => {
       const next = { ...settings, enabled };
@@ -179,6 +228,7 @@ export const useLiveAnswerSpeech = (
   useEffect(() => {
     if (isGenerating) {
       lastAutoSpokenRef.current = "";
+      heldAnswerRef.current = "";
       stop();
     }
   }, [isGenerating, stop]);
@@ -210,6 +260,18 @@ export const useLiveAnswerSpeech = (
     return () =>
       window.removeEventListener(SPEAK_ANSWER_HOTKEY_EVENT, handleHotkey);
   }, [supported, isGenerating, answer, speak, stop]);
+
+  // Global hold-to-read-answer hotkey: press-and-hold to play, release to
+  // pause in place. A new answer always restarts from the beginning (see the
+  // heldAnswerRef reset above) rather than resuming the previous one.
+  useEffect(() => {
+    window.addEventListener(READ_ANSWER_HOLD_DOWN_EVENT, playHeld);
+    window.addEventListener(READ_ANSWER_HOLD_UP_EVENT, pauseHeld);
+    return () => {
+      window.removeEventListener(READ_ANSWER_HOLD_DOWN_EVENT, playHeld);
+      window.removeEventListener(READ_ANSWER_HOLD_UP_EVENT, pauseHeld);
+    };
+  }, [playHeld, pauseHeld]);
 
   useEffect(() => stop, [stop]);
 

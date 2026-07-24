@@ -4,13 +4,22 @@ import { MessageSquareTextIcon, CheckIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 export const SystemPromptSelector = () => {
-  const { prompts, selectedPromptId, handleSelectPrompt } = useSystemPrompts();
+  const { prompts, selectedPromptId, handleSelectPrompt, refreshPrompts } =
+    useSystemPrompts();
   const [open, setOpen] = useState(false);
   const { resizeWindow } = useWindowResize();
 
+  // Refresh on every open (same fix already applied to ProfileSelector):
+  // this selector lives in the overlay window, but prompts are created in the
+  // Dashboard's System Prompts page — a separate window with its own
+  // useSystemPrompts() instance. The overlay's list only fetched once on
+  // mount, so a prompt created later was invisible here until a full restart.
   const handleOpen = (val: boolean) => {
     setOpen(val);
     resizeWindow(val);
+    if (val) {
+      refreshPrompts();
+    }
   };
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId) ?? null;

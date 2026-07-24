@@ -20,6 +20,9 @@ export interface PromptSegment {
   text: string;
 }
 
+export const LENGTH_RULE_PRECEDENCE_CLAUSE =
+  "The length rule above only governs how long a real answer should be. If any earlier instruction in this system prompt tells you not to answer, to stay silent, or to output a specific placeholder instead of an answer, follow that instruction instead — it always takes precedence over the length rule.";
+
 export function buildEnhancedSystemPrompt(
   baseSystemPrompt?: string,
   incomingSegments?: PromptSegment[],
@@ -38,6 +41,13 @@ export function buildEnhancedSystemPrompt(
   );
   if (lengthOption?.prompt?.trim()) {
     prompts.push(lengthOption.prompt);
+    // This rule only governs the SHAPE of an answer. It never overrides an
+    // earlier instruction in this system prompt to stay silent, decline, or
+    // output a specific placeholder/sentinel instead of a real answer —
+    // without this, models tend to treat the length rule's emphatic wording
+    // ("IMPORTANT", "strict requirement") as license to always produce a
+    // minimal answer even when the base prompt says not to answer at all.
+    prompts.push(LENGTH_RULE_PRECEDENCE_CLAUSE);
   }
 
   // Skip language segment when english — the model defaults to english anyway
@@ -56,6 +66,7 @@ export function buildEnhancedSystemPrompt(
   const segments: PromptSegment[] = [...(incomingSegments || [])];
   if (lengthOption?.prompt?.trim()) {
     segments.push({ name: "lengthRule", text: lengthOption.prompt });
+    segments.push({ name: "lengthRulePrecedence", text: LENGTH_RULE_PRECEDENCE_CLAUSE });
   }
   if (languageOption?.prompt?.trim() && responseSettings.language !== DEFAULT_LANGUAGE) {
     segments.push({ name: "language", text: languageOption.prompt });

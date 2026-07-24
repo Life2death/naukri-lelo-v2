@@ -29,6 +29,8 @@ import { CaptureMode } from "@/pages/app/components/speech/ModeSwitcher";
 import {
   LIVE_ANSWER_SPEECH_EVENT,
   SPEAK_ANSWER_HOTKEY_EVENT,
+  READ_ANSWER_HOLD_DOWN_EVENT,
+  READ_ANSWER_HOLD_UP_EVENT,
 } from "./useLiveAnswerSpeech";
 
 // VAD Configuration interface matching Rust
@@ -52,6 +54,12 @@ export interface InterviewChunk {
 // Cap on the rolling live-transcript buffer (recent utterances kept as a
 // safety net in auto mode so a missed question can still be fired manually).
 const INTERVIEW_TRANSCRIPT_MAX_CHUNKS = 30;
+
+// User-authored "hard format rule" sentinel (see their system prompt's WAIT
+// PROTOCOL): the model outputs exactly this when the live transcript is only
+// filler/incomplete, so nothing should be shown or saved for that turn.
+const WAIT_SENTINEL = "[WAIT]";
+const isWaitSentinel = (text: string) => text.trim() === WAIT_SENTINEL;
 
 // OPTIMIZED VAD defaults - matches backend exactly for perfect performance
 const DEFAULT_VAD_CONFIG: VadConfig = {
@@ -92,6 +100,14 @@ export function useSystemAudio() {
   const [capturing, setCapturing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAIProcessing, setIsAIProcessing] = useState(false);
+  // Synchronous mirror of isAIProcessing. autoAnswerFireRef.current is a
+  // callback closure updated by a useEffect keyed on autoAnswerQuestion,
+  // which only refreshes after a full render/commit cycle — so when two
+  // utterances resolve their STT close together, the second can still read
+  // the pre-render value of the isAIProcessing state and slip past the
+  // guard, firing a duplicate concurrent AI call. A ref set synchronously at
+  // the start of processWithAI closes that window.
+  const isAIProcessingRef = useRef(false);
   const [lastTranscription, setLastTranscription] = useState<string>("");
   const [lastAIResponse, setLastAIResponse] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -932,6 +948,8 @@ export function useSystemAudio() {
       previousMessages: Message[],
       segments?: { name: string; text: string }[]
     ) => {
+      isAIProcessingRef.current = true;
+
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -958,6 +976,14 @@ export function useSystemAudio() {
           return;
         }
 
+        // Holds back setLastAIResponse while the stream could still turn out
+        // to be exactly the WAIT sentinel — so a filler-transcript answer
+        // never overwrites (even briefly) the real answer on screen. The
+        // moment the accumulating text can no longer be a prefix of
+        // "[WAIT]", it's a real answer: flush everything buffered so far in
+        // one shot and stream normally from then on.
+        let couldStillBeWait = true;
+
         try {
           const failoverEnabled = getFailoverEnabled();
           const failoverChain = failoverEnabled
@@ -982,7 +1008,21 @@ export function useSystemAudio() {
             _source: "audio",
           })) {
             fullResponse += chunk;
-            setLastAIResponse((prev) => prev + chunk);
+
+            if (couldStillBeWait) {
+              const trimmed = fullResponse.trim();
+              if (
+                trimmed.length > WAIT_SENTINEL.length ||
+                !WAIT_SENTINEL.startsWith(trimmed)
+              ) {
+                couldStillBeWait = false;
+                setLastAIResponse(fullResponse);
+              }
+              // else: still could be exactly "[WAIT]" — hold back, don't
+              // display anything yet.
+            } else {
+              setLastAIResponse((prev) => prev + chunk);
+            }
           }
         } catch (aiError: any) {
           setError(
@@ -992,7 +1032,9 @@ export function useSystemAudio() {
           );
         }
 
-        if (fullResponse) {
+        const isWait = isWaitSentinel(fullResponse);
+
+        if (fullResponse && !isWait) {
           const timestamp = Date.now();
           setConversation((prev) => ({
             ...prev,
@@ -1018,6 +1060,7 @@ export function useSystemAudio() {
       } catch (err) {
         setError("Failed to get AI response");
       } finally {
+        isAIProcessingRef.current = false;
         setIsAIProcessing(false);
         // No auto-restart - user manually controls when to start next recording
       }
@@ -1125,7 +1168,11 @@ export function useSystemAudio() {
    * safety net. */
   const autoAnswerQuestion = useCallback(
     async (question: string) => {
-      if (!question.trim() || isAIProcessing) return;
+      // Checks the ref, not the isAIProcessing state — see isAIProcessingRef's
+      // declaration for why the state alone isn't a reliable synchronous guard.
+      if (!question.trim() || isAIProcessingRef.current) {
+        return;
+      }
       try {
         const effectivePrompt = buildEffectiveSystemPrompt();
         const previousMessages = conversation.messages.map((msg) => ({
@@ -1143,7 +1190,12 @@ export function useSystemAudio() {
         setError(err.message || "Failed to auto-answer");
       }
     },
-    [isAIProcessing, buildEffectiveSystemPrompt, conversation.messages, processWithAI]
+    // isAIProcessing intentionally omitted: the ref check above makes this
+    // callback correct regardless of that state's value, and dropping it
+    // from the deps means autoAnswerFireRef.current (updated by an effect
+    // keyed on this callback) doesn't churn on every AI call start/stop —
+    // which was itself part of the stale-closure race this ref check fixes.
+    [buildEffectiveSystemPrompt, conversation.messages, processWithAI]
   );
 
   useEffect(() => {
@@ -1172,6 +1224,19 @@ export function useSystemAudio() {
           selectedAudioDevices.output.id !== "default"
             ? selectedAudioDevices.output.id
             : null;
+
+        // Seed a fresh conversation id — without this, the debounced save
+        // effect (which requires conversation.id to be non-empty) never
+        // persists anything, so VAD/Interview Q&A silently never reaches
+        // Chats even though it displays fine live. Manual mode already does
+        // this below; VAD/Interview just never had the equivalent.
+        setConversation({
+          id: generateConversationId("sysaudio"),
+          title: "",
+          messages: [],
+          createdAt: 0,
+          updatedAt: 0,
+        });
 
         setInterviewChunks([]);
         interviewBufferTextRef.current = "";
@@ -1427,6 +1492,18 @@ export function useSystemAudio() {
     return () => {
       globalShortcuts.unregisterCustomShortcutCallback("speak_answer");
     };
+  }, [globalShortcuts]);
+
+  // Register hold_to_read_answer: press-and-hold to play the current answer,
+  // release to pause. Relayed to useLiveAnswerSpeech (mounted in a different
+  // component) via DOM events, same pattern as the speak_answer toggle above.
+  useEffect(() => {
+    globalShortcuts.registerReadAnswerKeyDownCallback(() => {
+      window.dispatchEvent(new CustomEvent(READ_ANSWER_HOLD_DOWN_EVENT));
+    });
+    globalShortcuts.registerReadAnswerKeyUpCallback(() => {
+      window.dispatchEvent(new CustomEvent(READ_ANSWER_HOLD_UP_EVENT));
+    });
   }, [globalShortcuts]);
 
   useEffect(() => {

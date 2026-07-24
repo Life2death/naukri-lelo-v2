@@ -95,6 +95,59 @@ src/
 
 ## Release history
 
+### v9.0.0 (July 24 2026)
+
+- ✨ **New: Hold to Read Answer shortcut.** Press-and-hold `Insert` (`CapsLock`
+  on macOS) to play the current AI answer aloud, release to pause in place,
+  press again to resume from exactly where you left off. A new answer always
+  restarts from the beginning rather than resuming the previous one. Distinct
+  from the existing toggle hotkey (`Ctrl+Shift+R`), which is unchanged.
+- 🐛 **Fix: TTS silently not speaking.** The `custom-shortcut-triggered` Tauri
+  event listener in `useGlobalShortcuts.ts` could get registered twice — a
+  race in the "clean up existing listener, then async re-register" pattern
+  that isn't atomic against React 19 StrictMode's dev-mode double-invoke of
+  effects. Every hotkey press fired its callback twice, and the second
+  invocation immediately canceled the speech the first had just started.
+  Guarded the whole setup behind a module-level flag set synchronously
+  before any `await`, so it only ever runs once per app lifetime.
+- 🐛 **Fix: VAD/Interview answers never appeared in Chats.** `startCapture`'s
+  Auto-detect/Interview branch never seeded a `conversation.id` — only Manual
+  mode did — so the debounced save silently bailed out every time. Now seeds
+  a fresh id there too.
+- 🐛 **Fix: duplicate concurrent AI answers for closely-spaced utterances.**
+  `autoAnswerQuestion`'s re-entrancy guard checked the `isAIProcessing` React
+  state, which could still read stale by the time a second utterance's STT
+  resolved (the callback ref it's called through only refreshes after a full
+  render/commit cycle). Two utterances landing close together could both
+  slip past the guard and fire a real, redundant API call. Replaced with a
+  synchronous `isAIProcessingRef`.
+- 🐛 **Fix: the `[WAIT]` filler-suppression sentinel could still flash on
+  screen and pollute history.** Streamed responses were pushed to the answer
+  panel chunk-by-chunk as they arrived, so a `[WAIT]` response (used by
+  system prompts to signal "nothing to answer here") would still overwrite
+  the real previous answer for the second or so it took to stream in, and —
+  being non-empty — still got saved as a conversation turn. The stream is
+  now buffered until it's provably not `[WAIT]` before touching the display,
+  and a confirmed `[WAIT]` result is never committed to history.
+- 🐛 **Fix: Prompt Inspector always showed "No captures yet."** Cross-window
+  sync relied on a browser `storage` event, already known unreliable across
+  separate Tauri/WebView2 windows in this codebase (see the `emit`/`listen`
+  workaround already in `theme.context.tsx`). Since all real prompt capture
+  happens in the overlay window while the inspector lives in the Dashboard's
+  Dev Space, it never received anything. Switched to `emit`/`listen`, with a
+  mount-time backfill of the last known capture.
+- 🐛 **Fix: newly created System Prompts invisible in the overlay until a
+  full restart.** Same root cause as the earlier profiles bug — the
+  overlay's prompt list only fetched once on mount, and a prompt created in
+  a different window never triggered a refetch. Now refreshes on every
+  picker open, mirroring `ProfileSelector`'s existing fix.
+- 🔧 **Length-rule precedence clause.** `buildEnhancedSystemPrompt` now
+  appends a short clause clarifying that its response-length instruction
+  only governs the shape of a real answer and never overrides an earlier
+  system-prompt instruction to stay silent or output a placeholder instead.
+- 🔖 **Version unified to 9.0.0** across `package.json`, `tauri.conf.json`,
+  `Cargo.toml`, and `Cargo.lock`.
+
 ### v6.1.0 (June 10 2026)
 
 - ✨ **New: Floating-bar mode & inline brain selectors.**
