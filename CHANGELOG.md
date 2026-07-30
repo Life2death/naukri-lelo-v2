@@ -95,6 +95,74 @@ src/
 
 ## Release history
 
+### v9.1.0 (July 30 2026)
+
+- 🐛 **Fix: TTS mute deadlock.** Releasing the hold-to-read-answer key
+  (`Insert`/`CapsLock`) paused speech but never announced "not speaking," so
+  interview/live capture stayed muted at the Rust source with nothing left to
+  un-mute it — a self-sustaining lockup requiring a manual stop/restart.
+- 🐛 **Fix: aborting a voice answer didn't actually stop it.** `processWithAI`
+  built an `AbortController` but never passed its signal to the request, so
+  `stopCapture` and unmount aborted a signal nobody was listening to.
+- 🐛 **Fix: deleting a conversation the overlay was using could resurrect it.**
+  The delete notification and "Open in Overlay" both still relied on the
+  browser `storage` event, which — like the Prompt Inspector bug fixed in
+  v9.0.0 — is never delivered between separate Tauri windows. Switched to
+  Tauri `emit`/`listen`.
+- 🐛 **Fix: API errors could be saved to history as the AI's answer.** Request
+  failures were `yield`ed as ordinary response text instead of thrown, so a
+  401 or network error rendered as the assistant's reply, showed no error UI,
+  and was persisted to SQLite — then fed back as context on the next turn.
+  Failures now throw a typed `AIResponseError`.
+- 🐛 **Fix: voice-mode conversation history sent to the LLM in reverse order.**
+  From the third turn onward the model received `[Q3,A3,Q2,A2,Q1,A1]` instead
+  of chronological order, so follow-ups resolved against the wrong turn.
+- 🐛 **Fix: `$` in a question or resume could corrupt the request body.**
+  Unescaped `$` in substituted values let `String.replace`'s special
+  replacement patterns (`$&`, `$$`, `` $` ``) mangle the prompt — e.g. asking
+  about `$&` sent the model the literal text `{{TEXT}}`.
+- 🐛 **Fix: the overlay's screenshot button silently discarded the image.**
+  It captured and previewed the screenshot ("will be sent with next
+  transcription") but nothing ever attached it to the actual AI request.
+- 🐛 **Fix: duplicate Tauri event listeners could transcribe every utterance
+  twice.** Several `listen()` calls had no cancellation guard against a
+  teardown that ran before the async registration resolved, leaking a second
+  live subscription — reliably reproducible via StrictMode's double-invoke.
+- 🐛 Also fixed: Auto-detect silently dropping a question asked while the
+  previous answer was still streaming (now queued instead of discarded);
+  Manual mode permanently hiding the VAD sensitivity settings after first use;
+  a reader/connection leak on every AI-provider failover hop; a dropped final
+  chunk when a provider's stream ended without a trailing newline; and several
+  stale-closure/dependency-array bugs that could send a voice answer to a
+  provider, model, or API key that had since been changed.
+- ✨ **New: dev builds are tinted green.** Running `npm run tauri dev` now
+  renders in a distinct accent color from any built exe (local or from the
+  GitHub release workflow), so it's obvious at a glance which window is which
+  when both are open at once.
+- 🔧 **Fix: the active System Prompt and Interview Profile selection didn't
+  survive across a dev build and a production build.** Both are different
+  webview origins, so anything kept in `localStorage` — including which
+  prompt/profile was selected — silently diverged between them even though
+  both builds already shared the same SQLite database. Moved the selection
+  into a new shared `app_settings` SQLite table, adopting whatever an
+  existing install's `localStorage` already held on first run.
+- ✨ **AI Context and length shortcuts now match across Auto-detect and
+  Interview mode.** The "Use Interview Co-Pilot" toggle only worked in
+  Interview mode, and the response-length quick-settings/regenerate-at-length
+  controls were hidden specifically in Interview mode — with no functional
+  reason, since both live modes share the same capture pipeline. Both
+  controls are now available in both modes.
+- 🐛 **Fix: the Co-Pilot prompt ignored the selected response length.** Its
+  own output-format section hardcoded "4–8 bullets" as a strict rule, which
+  competed with (and reliably won out over) the separate length-tier
+  instruction meant to vary that count by the Short/Medium/Long/Auto setting.
+  Reworded so the length tier is unambiguously authoritative.
+- 🔧 Updated the Claude model suggestions in the Brain selector to the 5th
+  generation (`claude-sonnet-5`, `claude-opus-5`, plus `claude-fable-5`
+  alongside the unchanged `claude-haiku-4-5`).
+- 🔖 Version bumped to 9.1.0 across `package.json`, `tauri.conf.json`,
+  `Cargo.toml`, and `Cargo.lock`.
+
 ### v9.0.0 (July 24 2026)
 
 - ✨ **New: Hold to Read Answer shortcut.** Press-and-hold `Insert` (`CapsLock`
