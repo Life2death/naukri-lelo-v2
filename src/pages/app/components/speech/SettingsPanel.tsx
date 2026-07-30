@@ -55,13 +55,19 @@ interface SettingsPanelProps {
   // VAD Config
   vadConfig: VadConfig;
   onUpdateVadConfig: (config: VadConfig) => void;
-  // Context settings
+  // Context settings — the regular "system prompt vs custom context" choice.
+  // Always available; it's what's used when Co-Pilot (below) is unavailable
+  // or turned off.
   useSystemPrompt: boolean;
   setUseSystemPrompt: (value: boolean) => void;
   contextContent: string;
   setContextContent: (content: string) => void;
-  // Interview mode
-  interviewMode?: boolean;
+  // Interview Co-Pilot — offered in both live-capture modes (Auto-detect and
+  // Interview), not just Interview. Manual doesn't pass these, so the panel
+  // falls back to the plain system-prompt/context section only.
+  copilotEligible?: boolean;
+  useCopilotPrompt?: boolean;
+  setUseCopilotPrompt?: (value: boolean) => void;
 }
 
 export const SettingsPanel = ({
@@ -71,7 +77,9 @@ export const SettingsPanel = ({
   setUseSystemPrompt,
   contextContent,
   setContextContent,
-  interviewMode = false,
+  copilotEligible = false,
+  useCopilotPrompt = false,
+  setUseCopilotPrompt,
 }: SettingsPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -223,22 +231,28 @@ export const SettingsPanel = ({
               AI Context
             </h4>
 
-            {interviewMode ? (
+            {copilotEligible && (
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
                   <Label className="text-xs font-medium">Use Interview Co-Pilot</Label>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {useSystemPrompt
+                    {useCopilotPrompt
                       ? "Using specialized interview prompt (SAY + cue cards)"
-                      : "Using default system prompt from settings"}
+                      : "Using system prompt / context below"}
                   </p>
                 </div>
                 <Switch
-                  checked={useSystemPrompt}
-                  onCheckedChange={setUseSystemPrompt}
+                  checked={useCopilotPrompt}
+                  onCheckedChange={setUseCopilotPrompt}
                 />
               </div>
-            ) : (
+            )}
+
+            {/* Regular system-prompt/context choice. Hidden only when
+                Co-Pilot is on, since it takes over the prompt entirely —
+                otherwise (Co-Pilot off, or unavailable e.g. Manual mode) this
+                is the one in effect. */}
+            {(!copilotEligible || !useCopilotPrompt) && (
               <>
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1">

@@ -371,7 +371,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
                 <div className="flex items-center justify-end gap-1.5">
                   {!setupRequired && (
                     <>
-                      {!isInterviewMode && <ResponseQuickSettings />}
+                      {/* Response-length quick settings + regenerate-at-length
+                          (below) are available in every capture mode,
+                          including Interview — previously Interview-only
+                          lacked both even though `regenerate()` and the
+                          Co-Pilot prompt's own LENGTH TIERS section already
+                          supported them. */}
+                      <ResponseQuickSettings />
 
                       {/* Panel size */}
                       <Popover>
@@ -463,7 +469,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       </Popover>
 
                       {/* Regenerate at length — ported from the typed-completion panel */}
-                      {!isInterviewMode && (
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -497,7 +502,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
                           ))}
                         </PopoverContent>
                       </Popover>
-                      )}
                     </>
                   )}
 
@@ -721,15 +725,18 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setConversationMode={setConversationMode}
                     />
 
-                    {/* Settings Panel - with interview-specific toggle */}
+                    {/* Settings Panel — same AI Context section (Co-Pilot +
+                        System Prompt/Context) as Auto-detect below */}
                     <SettingsPanel
                       vadConfig={vadConfig}
                       onUpdateVadConfig={updateVadConfiguration}
-                      useSystemPrompt={useCopilotPrompt}
-                      setUseSystemPrompt={setUseCopilotPrompt}
+                      useSystemPrompt={useSystemPrompt}
+                      setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
-                      interviewMode={true}
+                      copilotEligible
+                      useCopilotPrompt={useCopilotPrompt}
+                      setUseCopilotPrompt={setUseCopilotPrompt}
                     />
 
                     <Warning isVadMode={false} />
@@ -760,7 +767,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setConversationMode={setConversationMode}
                     />
 
-                    {/* Settings Panel */}
+                    {/* Settings Panel — Co-Pilot is offered here too, but only
+                        in Auto-detect (isVadMode). Manual is push-to-talk, a
+                        genuinely separate capture pipeline, and keeps just the
+                        plain System Prompt/Context section. */}
                     <SettingsPanel
                       vadConfig={vadConfig}
                       onUpdateVadConfig={updateVadConfiguration}
@@ -768,6 +778,9 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
+                      copilotEligible={isVadMode}
+                      useCopilotPrompt={useCopilotPrompt}
+                      setUseCopilotPrompt={setUseCopilotPrompt}
                     />
 
                     {/* Help/Keyboard Shortcuts */}

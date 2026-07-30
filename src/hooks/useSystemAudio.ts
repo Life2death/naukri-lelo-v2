@@ -371,16 +371,18 @@ export function useSystemAudio() {
     text: string;
     segments: { name: string; text: string }[];
   } => {
-    const isInterviewMode = captureMode === "interview";
-    const base = isInterviewMode
-      ? useCopilotPrompt
+    // Co-Pilot is offered in both live-capture modes (Auto-detect and
+    // Interview share the same continuous transcript pipeline — see
+    // usesInterviewPipeline above), not just Interview. Manual is a genuinely
+    // separate push-to-talk pipeline and keeps the plain system-prompt/context
+    // choice only.
+    const coPilotEligible = captureMode === "interview" || captureMode === "vad";
+    const base =
+      coPilotEligible && useCopilotPrompt
         ? INTERVIEW_COPILOT_PROMPT
         : useSystemPrompt
           ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-          : contextContent || DEFAULT_SYSTEM_PROMPT
-      : useSystemPrompt
-        ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-        : contextContent || DEFAULT_SYSTEM_PROMPT;
+          : contextContent || DEFAULT_SYSTEM_PROMPT;
     const profileCtx = profileBriefRef.current || profileContextRef.current;
     if (!profileCtx) {
       return { text: base, segments: [{ name: "base", text: base }] };
