@@ -223,15 +223,19 @@ describe("fetchAIResponseWithFailover", () => {
       { provider: providerA, variables: { api_key: "key-a", model: "model-a" } },
       { provider: providerB, variables: { api_key: "key-b", model: "model-b" } },
     ];
-    const chunks = await collectChunks(
-      fetchAIResponseWithFailover({
-        provider: providerA,
-        selectedProvider,
-        failoverChain,
-        userMessage: "hi",
-      })
-    );
-    expect(chunks.join("")).toMatch(/API request failed.*400/i);
+    // A non-retryable failure now surfaces as a thrown error rather than being
+    // yielded as answer text, but the important behaviour is unchanged: it is
+    // NOT retried against the next provider in the chain.
+    await expect(
+      collectChunks(
+        fetchAIResponseWithFailover({
+          provider: providerA,
+          selectedProvider,
+          failoverChain,
+          userMessage: "hi",
+        })
+      )
+    ).rejects.toThrow(/API request failed.*400/i);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 

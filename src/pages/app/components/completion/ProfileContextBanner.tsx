@@ -8,11 +8,13 @@
  * so the user always knows what context the AI sees.
  */
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { BriefcaseIcon, FileTextIcon, MessagesSquareIcon } from "lucide-react";
 import { useApp } from "@/contexts";
 import {
   getProfileById,
   getProfileRefConvIds,
+  PROFILE_UPDATED_EVENT,
 } from "@/lib";
 import { InterviewProfile } from "@/types";
 
@@ -20,6 +22,36 @@ export const ProfileContextBanner = () => {
   const { activeProfileId } = useApp();
   const [profile, setProfile] = useState<InterviewProfile | null>(null);
   const [refConvCount, setRefConvCount] = useState<number>(0);
+  // Forces a refetch when a profile is edited in another window. Profiles live
+  // in SQLite, so there is no `storage` event to observe — and this banner
+  // reports what the AI actually sees, so a stale "0 docs" here is actively
+  // misleading.
+  const [reloadTick, setReloadTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const fn = await listen(PROFILE_UPDATED_EVENT, () => {
+          setReloadTick((tick) => tick + 1);
+        });
+        if (cancelled) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+      } catch {
+        // Non-fatal: the banner just won't live-update.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeProfileId) {
@@ -44,7 +76,7 @@ export const ProfileContextBanner = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeProfileId]);
+  }, [activeProfileId, reloadTick]);
 
   // Nothing to show when no profile is active — the AI just uses the
   // selected System Prompt (or the default) on its own.

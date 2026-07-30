@@ -53,6 +53,12 @@
   --radius: 0.625rem;
   --cursor-type: default;
 
+  /* Brand hue for every blue-tinted color below. Overridden to green by
+     .dev-build (see below) so a locally-run `tauri dev` window is visually
+     unmistakable from a built exe (local or GitHub release build), which
+     both go through `vite build` and never carry that class. */
+  --brand-hue: 245;
+
   /* Surface */
   --background: oklch(1 0 0);                  /* pure white */
   --foreground: oklch(0.22 0.02 250);          /* near-black with cool blue tint */
@@ -62,37 +68,37 @@
   --popover-foreground: oklch(0.22 0.02 250);
 
   /* Primary = vibrant light blue (~Tailwind blue-500) */
-  --primary: oklch(0.62 0.18 245);
-  --primary-foreground: oklch(0.99 0.01 240);
+  --primary: oklch(0.62 0.18 var(--brand-hue));
+  --primary-foreground: oklch(0.99 0.01 var(--brand-hue));
 
   /* Secondary / muted / accent = very pale blue tints */
-  --secondary: oklch(0.965 0.025 240);
-  --secondary-foreground: oklch(0.32 0.08 245);
-  --muted: oklch(0.97 0.015 240);
-  --muted-foreground: oklch(0.50 0.03 245);
-  --accent: oklch(0.94 0.04 240);
-  --accent-foreground: oklch(0.32 0.10 245);
+  --secondary: oklch(0.965 0.025 var(--brand-hue));
+  --secondary-foreground: oklch(0.32 0.08 var(--brand-hue));
+  --muted: oklch(0.97 0.015 var(--brand-hue));
+  --muted-foreground: oklch(0.50 0.03 var(--brand-hue));
+  --accent: oklch(0.94 0.04 var(--brand-hue));
+  --accent-foreground: oklch(0.32 0.10 var(--brand-hue));
 
   --destructive: oklch(0.62 0.22 25);
-  --border: oklch(0.9 0.02 240);
-  --input: oklch(0.92 0.02 240);
-  --ring: oklch(0.62 0.18 245);
+  --border: oklch(0.9 0.02 var(--brand-hue));
+  --input: oklch(0.92 0.02 var(--brand-hue));
+  --ring: oklch(0.62 0.18 var(--brand-hue));
 
-  --chart-1: oklch(0.62 0.18 245);
+  --chart-1: oklch(0.62 0.18 var(--brand-hue));
   --chart-2: oklch(0.70 0.13 200);
   --chart-3: oklch(0.55 0.16 280);
   --chart-4: oklch(0.75 0.15 160);
   --chart-5: oklch(0.65 0.20 30);
 
   /* Sidebar = soft sky tint so it visually separates from the main canvas */
-  --sidebar: oklch(0.975 0.02 240);
+  --sidebar: oklch(0.975 0.02 var(--brand-hue));
   --sidebar-foreground: oklch(0.22 0.02 250);
-  --sidebar-primary: oklch(0.62 0.18 245);
-  --sidebar-primary-foreground: oklch(0.99 0.01 240);
-  --sidebar-accent: oklch(0.93 0.045 240);
-  --sidebar-accent-foreground: oklch(0.32 0.10 245);
-  --sidebar-border: oklch(0.9 0.025 240);
-  --sidebar-ring: oklch(0.62 0.18 245);
+  --sidebar-primary: oklch(0.62 0.18 var(--brand-hue));
+  --sidebar-primary-foreground: oklch(0.99 0.01 var(--brand-hue));
+  --sidebar-accent: oklch(0.93 0.045 var(--brand-hue));
+  --sidebar-accent-foreground: oklch(0.32 0.10 var(--brand-hue));
+  --sidebar-border: oklch(0.9 0.025 var(--brand-hue));
+  --sidebar-ring: oklch(0.62 0.18 var(--brand-hue));
 }
 
 .dark {
@@ -103,31 +109,40 @@
   --card-foreground: oklch(0.97 0.01 240);
   --popover: oklch(0.23 0.035 250);
   --popover-foreground: oklch(0.97 0.01 240);
-  --primary: oklch(0.72 0.16 245);
-  --primary-foreground: oklch(0.18 0.04 250);
-  --secondary: oklch(0.30 0.04 245);
+  --primary: oklch(0.72 0.16 var(--brand-hue));
+  --primary-foreground: oklch(0.18 0.04 var(--brand-hue));
+  --secondary: oklch(0.30 0.04 var(--brand-hue));
   --secondary-foreground: oklch(0.97 0.01 240);
-  --muted: oklch(0.30 0.04 245);
-  --muted-foreground: oklch(0.72 0.03 245);
-  --accent: oklch(0.34 0.06 245);
+  --muted: oklch(0.30 0.04 var(--brand-hue));
+  --muted-foreground: oklch(0.72 0.03 var(--brand-hue));
+  --accent: oklch(0.34 0.06 var(--brand-hue));
   --accent-foreground: oklch(0.97 0.01 240);
   --destructive: oklch(0.70 0.20 25);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 18%);
-  --ring: oklch(0.72 0.16 245);
-  --chart-1: oklch(0.72 0.16 245);
+  --ring: oklch(0.72 0.16 var(--brand-hue));
+  --chart-1: oklch(0.72 0.16 var(--brand-hue));
   --chart-2: oklch(0.70 0.17 162);
   --chart-3: oklch(0.77 0.19 70);
   --chart-4: oklch(0.63 0.27 304);
   --chart-5: oklch(0.65 0.25 16);
-  --sidebar: oklch(0.23 0.04 250);
+  --sidebar: oklch(0.23 0.04 var(--brand-hue));
   --sidebar-foreground: oklch(0.97 0.01 240);
-  --sidebar-primary: oklch(0.72 0.16 245);
-  --sidebar-primary-foreground: oklch(0.18 0.04 250);
-  --sidebar-accent: oklch(0.30 0.05 245);
+  --sidebar-primary: oklch(0.72 0.16 var(--brand-hue));
+  --sidebar-primary-foreground: oklch(0.18 0.04 var(--brand-hue));
+  --sidebar-accent: oklch(0.30 0.05 var(--brand-hue));
   --sidebar-accent-foreground: oklch(0.97 0.01 240);
   --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.72 0.16 245);
+  --sidebar-ring: oklch(0.72 0.16 var(--brand-hue));
+}
+
+/* Dev-build indicator: `main.tsx` adds this class to <html> only when
+   running under `import.meta.env.DEV` (i.e. `npm run tauri dev`, via the
+   Vite dev server). Any built exe — `npm run tauri build` locally or the
+   GitHub release workflow — goes through `vite build` instead, where DEV is
+   false, so this never applies and the app stays blue. */
+.dev-build {
+  --brand-hue: 145;
 }
 
 @layer base {

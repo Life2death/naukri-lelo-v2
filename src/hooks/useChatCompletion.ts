@@ -16,6 +16,13 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+/**
+ * Most recent messages resent as context on each request. The overlay hook
+ * (useCompletion) has always capped this; the chat window did not, which made
+ * long conversations progressively more expensive and eventually unusable.
+ */
+const CHAT_HISTORY_LIMIT = 20;
+
 // Types for completion
 interface AttachedFile {
   id: string;
@@ -132,7 +139,13 @@ export const useChatCompletion = (
   }, []);
 
   const submit = useCallback(
-    async (speechText?: string) => {
+    // extraImagesBase64 lets a caller attach images for *this* request without
+    // first staging them into state.attachedFiles. The screenshot auto-submit
+    // path used to setState then fire submit() from a setTimeout, but that
+    // timer captured the pre-render `submit` whose closure still had the old
+    // (empty) attachedFiles — so the prompt was sent with no image at all, and
+    // submit then cleared the attachment, discarding the screenshot entirely.
+    async (speechText?: string, extraImagesBase64?: string[]) => {
       const input = speechText || state.input;
 
       if (!input.trim()) {
@@ -159,14 +172,19 @@ export const useChatCompletion = (
       const signal = abortControllerRef.current.signal;
 
       try {
-        // Prepare message history for the AI
-        const messageHistory = (messages?.messages || []).map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+        // Prepare message history for the AI, capped to the most recent turns.
+        // This was previously unbounded: a long chat resent every prior turn on
+        // every request, so cost grew quadratically until the provider
+        // rejected the request outright on context length.
+        const messageHistory = (messages?.messages || [])
+          .slice(-CHAT_HISTORY_LIMIT)
+          .map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          }));
 
         // Handle image attachments
-        const imagesBase64: string[] = [];
+        const imagesBase64: string[] = [...(extraImagesBase64 || [])];
         if (state.attachedFiles.length > 0) {
           state.attachedFiles.forEach((file) => {
             if (file.type.startsWith("image/")) {
@@ -392,6 +410,9 @@ export const useChatCompletion = (
       state.attachedFiles,
       selectedAIProvider,
       allAiProviders,
+      // See useCompletion: read when building the failover chain, so omitting
+      // it meant a rotated fallback key was ignored on the voice path.
+      providerVariables,
       systemPrompt,
       messages,
       conversationId,
@@ -458,15 +479,10 @@ export const useChatCompletion = (
             size: base64.length,
           };
 
-          // Store files temporarily and submit
-          setState((prev) => ({
-            ...prev,
-            attachedFiles: [...prev.attachedFiles, attachedFile],
-            input: prompt,
-          }));
-
-          // Submit with the prompt and screenshot
-          setTimeout(() => submit(prompt), 100);
+          // Pass the image straight into this request rather than staging it
+          // in state and hoping a later render lands before the timer fires.
+          setState((prev) => ({ ...prev, input: prompt }));
+          await submit(prompt, [attachedFile.base64]);
         } else {
           // Manual mode: Add to attached files
           const attachedFile: AttachedFile = {

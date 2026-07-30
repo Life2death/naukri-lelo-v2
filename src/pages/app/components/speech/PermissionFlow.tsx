@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components";
 import {
   CheckCircle2Icon,
@@ -25,6 +25,36 @@ export const PermissionFlow = ({
   const [checkAttempts, setCheckAttempts] = useState(0);
   const [showManual, setShowManual] = useState(false);
 
+  // Every timer/interval this component starts is tracked here and torn down
+  // on unmount. Without this, closing the panel mid-flow left a 1Hz poll
+  // running for up to 20s against an unmounted component — and if permission
+  // happened to be granted in that window it called onPermissionGranted(),
+  // starting audio capture from a panel the user had already closed. Reopening
+  // the setup screen started a second concurrent poll on top.
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const intervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  const isMountedRef = useRef(true);
+
+  const trackedTimeout = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timersRef.current.delete(id);
+      if (isMountedRef.current) fn();
+    }, ms);
+    timersRef.current.add(id);
+    return id;
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current.clear();
+      intervalsRef.current.forEach(clearInterval);
+      intervalsRef.current.clear();
+    };
+  }, []);
+
   useEffect(() => {
     checkPermission();
   }, []);
@@ -34,9 +64,11 @@ export const PermissionFlow = ({
       setPermissionState("checking");
       const hasAccess = await invoke<boolean>("check_system_audio_access");
 
+      if (!isMountedRef.current) return;
+
       if (hasAccess) {
         setPermissionState("granted");
-        setTimeout(() => onPermissionGranted(), 500);
+        trackedTimeout(() => onPermissionGranted(), 500);
       } else {
         setPermissionState("denied");
         onPermissionDenied();
@@ -56,19 +88,33 @@ export const PermissionFlow = ({
       let attempts = 0;
       const maxAttempts = 20;
 
+      const stopPolling = () => {
+        clearInterval(pollInterval);
+        intervalsRef.current.delete(pollInterval);
+      };
+
       const pollInterval = setInterval(async () => {
+        if (!isMountedRef.current) {
+          stopPolling();
+          return;
+        }
+
         attempts++;
         setCheckAttempts(attempts);
 
         try {
           const hasAccess = await invoke<boolean>("check_system_audio_access");
+          if (!isMountedRef.current) {
+            stopPolling();
+            return;
+          }
 
           if (hasAccess) {
-            clearInterval(pollInterval);
+            stopPolling();
             setPermissionState("granted");
-            setTimeout(() => onPermissionGranted(), 500);
+            trackedTimeout(() => onPermissionGranted(), 500);
           } else if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
+            stopPolling();
             setPermissionState("denied");
             onPermissionDenied();
           }
@@ -76,6 +122,7 @@ export const PermissionFlow = ({
           console.error("Permission poll failed:", error);
         }
       }, 1000);
+      intervalsRef.current.add(pollInterval);
     } catch (error) {
       console.error("Permission request failed:", error);
       setPermissionState("denied");

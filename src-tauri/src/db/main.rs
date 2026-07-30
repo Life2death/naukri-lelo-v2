@@ -45,5 +45,13 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("migrations/interview-profiles-v4.sql"),
             kind: MigrationKind::Up,
         },
+        // Migration 7: Shared key/value settings, so selections survive the
+        // dev/prod localStorage origin split
+        Migration {
+            version: 7,
+            description: "create_app_settings_table",
+            sql: include_str!("migrations/app-settings.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }

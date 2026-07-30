@@ -90,6 +90,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
     useCopilotPrompt,
     setUseCopilotPrompt,
     updateOverlayWindowSize,
+    pendingScreenshot: screenshotImage,
+    setPendingScreenshot: setScreenshotImage,
   } = props;
 
   const { supportsImages } = useApp();
@@ -117,8 +119,9 @@ export const SystemAudio = (props: useSystemAudioType) => {
     };
   }, []);
 
-  // Screenshot state
-  const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
+  // Screenshot state now lives in useSystemAudio (destructured above) so the
+  // captured image actually reaches the AI request. Keeping it local here is
+  // what made the feature a no-op.
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
   const isVadMode = captureMode === "vad";
@@ -146,8 +149,24 @@ export const SystemAudio = (props: useSystemAudioType) => {
         setConversationMode((prev) => !prev);
       }
 
-      // Enter to fire in interview mode (when panel is focused)
-      if (isInterviewMode && e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      // Enter to fire in interview mode (when panel is focused).
+      // Ignore Enter typed into a field — otherwise adding a quick action (or
+      // any other text entry in the panel) also fired an unwanted AI request
+      // and wiped the transcript buffer.
+      const target = e.target;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+
+      if (
+        isInterviewMode &&
+        !isTyping &&
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
         e.preventDefault();
         fireInterviewBuffer();
       }
@@ -157,12 +176,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen, isInterviewMode, fireInterviewBuffer]);
 
-  // Reset screenshot when processing starts (message is being sent)
-  useEffect(() => {
-    if (isProcessing && screenshotImage) {
-      setScreenshotImage(null);
-    }
-  }, [isProcessing, screenshotImage]);
+  // The staged screenshot is now cleared by processWithAI at the moment it is
+  // actually attached to a request. The old effect here cleared it on
+  // `isProcessing`, which Interview mode never sets (it uses isFireProcessing
+  // / isAIProcessing) — so in that mode the thumbnail stuck around forever.
 
   const handleToggleCapture = async () => {
     if (capturing || interviewCapturing) {
@@ -354,7 +371,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
                 <div className="flex items-center justify-end gap-1.5">
                   {!setupRequired && (
                     <>
-                      {!isInterviewMode && <ResponseQuickSettings />}
+                      {/* Response-length quick settings + regenerate-at-length
+                          (below) are available in every capture mode,
+                          including Interview — previously Interview-only
+                          lacked both even though `regenerate()` and the
+                          Co-Pilot prompt's own LENGTH TIERS section already
+                          supported them. */}
+                      <ResponseQuickSettings />
 
                       {/* Panel size */}
                       <Popover>
@@ -446,7 +469,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       </Popover>
 
                       {/* Regenerate at length — ported from the typed-completion panel */}
-                      {!isInterviewMode && (
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -480,7 +502,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
                           ))}
                         </PopoverContent>
                       </Popover>
-                      )}
                     </>
                   )}
 
@@ -704,15 +725,18 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setConversationMode={setConversationMode}
                     />
 
-                    {/* Settings Panel - with interview-specific toggle */}
+                    {/* Settings Panel — same AI Context section (Co-Pilot +
+                        System Prompt/Context) as Auto-detect below */}
                     <SettingsPanel
                       vadConfig={vadConfig}
                       onUpdateVadConfig={updateVadConfiguration}
-                      useSystemPrompt={useCopilotPrompt}
-                      setUseSystemPrompt={setUseCopilotPrompt}
+                      useSystemPrompt={useSystemPrompt}
+                      setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
-                      interviewMode={true}
+                      copilotEligible
+                      useCopilotPrompt={useCopilotPrompt}
+                      setUseCopilotPrompt={setUseCopilotPrompt}
                     />
 
                     <Warning isVadMode={false} />
@@ -743,7 +767,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setConversationMode={setConversationMode}
                     />
 
-                    {/* Settings Panel */}
+                    {/* Settings Panel — Co-Pilot is offered here too, but only
+                        in Auto-detect (isVadMode). Manual is push-to-talk, a
+                        genuinely separate capture pipeline, and keeps just the
+                        plain System Prompt/Context section. */}
                     <SettingsPanel
                       vadConfig={vadConfig}
                       onUpdateVadConfig={updateVadConfiguration}
@@ -751,6 +778,9 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
+                      copilotEligible={isVadMode}
+                      useCopilotPrompt={useCopilotPrompt}
+                      setUseCopilotPrompt={setUseCopilotPrompt}
                     />
 
                     {/* Help/Keyboard Shortcuts */}

@@ -5,6 +5,12 @@ import {
   STORAGE_KEYS,
 } from "@/config";
 import { getPlatform, safeLocalStorage, trackAppStart } from "@/lib";
+import {
+  getAppSettingWithLocalStorageFallback,
+  setAppSetting,
+  APP_SETTING_KEYS,
+  APP_SETTING_CHANGED_EVENT,
+} from "@/lib/database";
 import { getShortcutsConfig } from "@/lib/storage";
 import {
   getCustomizableState,
@@ -149,13 +155,43 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     safeLocalStorage.setItem(STORAGE_KEYS.SUPPORTS_IMAGES, String(value));
   };
 
-  // Active Interview Profile
+  // Active Interview Profile.
+  //
+  // The selection is persisted in SQLite (shared by every build and window),
+  // not localStorage — the webview partitions localStorage by origin, and a
+  // dev build (http://localhost:1420) and a production build
+  // (http://tauri.localhost) are different origins. Profile *records* were
+  // always in SQLite, so the list looked in sync while the active selection
+  // silently diverged. localStorage is still written as a synchronous seed
+  // for the initial render and for backwards compatibility with an older
+  // build that may still be reading it.
   const [activeProfileId, setActiveProfileIdState] = useState<string | null>(
     safeLocalStorage.getItem(STORAGE_KEYS.ACTIVE_PROFILE_ID) || null
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = await getAppSettingWithLocalStorageFallback(
+        APP_SETTING_KEYS.ACTIVE_PROFILE_ID,
+        STORAGE_KEYS.ACTIVE_PROFILE_ID
+      );
+      if (cancelled) return;
+      setActiveProfileIdState(stored || null);
+      if (stored) {
+        safeLocalStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE_ID, stored);
+      } else {
+        safeLocalStorage.removeItem(STORAGE_KEYS.ACTIVE_PROFILE_ID);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const setActiveProfileId = (id: string | null) => {
     setActiveProfileIdState(id);
+    void setAppSetting(APP_SETTING_KEYS.ACTIVE_PROFILE_ID, id);
     if (id) {
       safeLocalStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE_ID, id);
     } else {
@@ -499,6 +535,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         setSupportsImagesState(e.newValue === "true");
       }
 
+      // Kept for same-window writes. Cross-window delivery is handled by the
+      // APP_SETTING_CHANGED_EVENT listener below — `storage` is not delivered
+      // between Tauri webview windows.
       if (e.key === STORAGE_KEYS.ACTIVE_PROFILE_ID) {
         setActiveProfileIdState(e.newValue || null);
       }
@@ -519,6 +558,46 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  // Shared-settings changes from any other window. This is the channel that
+  // actually crosses the Dashboard <-> overlay boundary; the `storage` event
+  // above never fires between separate Tauri webview windows.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const fn = await listen<{ key: string; value: string | null }>(
+          APP_SETTING_CHANGED_EVENT,
+          (event) => {
+            if (event.payload?.key !== APP_SETTING_KEYS.ACTIVE_PROFILE_ID) {
+              return;
+            }
+            const next = event.payload.value || null;
+            setActiveProfileIdState(next);
+            if (next) {
+              safeLocalStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE_ID, next);
+            } else {
+              safeLocalStorage.removeItem(STORAGE_KEYS.ACTIVE_PROFILE_ID);
+            }
+          }
+        );
+        if (cancelled) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+      } catch (error) {
+        console.error("Failed to listen for app setting changes:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Check if the current AI provider/model supports images

@@ -21,6 +21,15 @@ const App = () => {
   const { customizable } = useAppContext();
   const platform = getPlatform();
 
+  // `capturing` is set only by the Manual (push-to-talk) path; Auto-detect and
+  // Interview set `interviewCapturing` instead. Gating the collapsed bar on
+  // `capturing` alone meant that in those two modes the overlay looked
+  // completely idle — no visualizer, no status dot — while system audio was
+  // being captured and auto-answered.
+  const isCapturingAudio = Boolean(
+    systemAudio?.capturing || systemAudio?.interviewCapturing
+  );
+
   const openDashboard = async () => {
     try {
       await invoke("open_dashboard");
@@ -46,10 +55,10 @@ const App = () => {
       >
         <Card className="w-full flex flex-row items-center gap-2 p-2">
           <SystemAudio {...systemAudio} />
-          {systemAudio?.capturing ? (
+          {isCapturingAudio ? (
             <div className="flex flex-row items-center gap-2 justify-between w-full">
               <div className="flex flex-1 items-center gap-2">
-                <AudioVisualizer isRecording={systemAudio?.capturing} />
+                <AudioVisualizer isRecording={isCapturingAudio} />
               </div>
               <div className="flex !w-fit items-center gap-2">
                 <StatusIndicator
@@ -57,7 +66,7 @@ const App = () => {
                   error={systemAudio.error}
                   isProcessing={systemAudio.isProcessing}
                   isAIProcessing={systemAudio.isAIProcessing}
-                  capturing={systemAudio.capturing}
+                  capturing={isCapturingAudio}
                 />
               </div>
             </div>
@@ -65,7 +74,7 @@ const App = () => {
 
           <div
             className={`${
-              systemAudio?.capturing
+              isCapturingAudio
                 ? "hidden w-full fade-out transition-all duration-300"
                 : "w-full flex flex-row gap-2 items-center"
             }`}

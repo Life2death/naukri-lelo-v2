@@ -34,7 +34,10 @@ export function useCustomAiProviders() {
       ...provider,
     });
     setEditingProvider(providerId);
-    setShowForm(!showForm);
+    // Open, don't toggle. Toggling meant clicking "Edit" on provider B while
+    // already editing provider A *closed* the form, even though the form had
+    // just been switched to B.
+    setShowForm(true);
     setErrors({});
   };
 
@@ -62,9 +65,16 @@ export function useCustomAiProviders() {
       if (success) {
         setDeleteConfirm(null);
         loadData(); // Refresh data
+      } else {
+        // Previously this branch did nothing at all: the dialog just sat open
+        // with no explanation and the user assumed it had worked.
+        setErrors({ general: "Failed to delete provider. Please try again." });
+        setDeleteConfirm(null);
       }
     } catch (error) {
       console.error("Error deleting custom provider:", error);
+      setErrors({ general: "Failed to delete provider. Please try again." });
+      setDeleteConfirm(null);
     }
   };
 
@@ -115,6 +125,10 @@ export function useCustomAiProviders() {
             curl: "",
           });
           loadData(); // Refresh data
+        } else {
+          // Surface the failure. This branch used to be empty, so a failed
+          // save left the form open looking exactly like a successful one.
+          setErrors({ general: "Failed to update provider. Please try again." });
         }
       } else {
         // Create new provider
@@ -135,10 +149,13 @@ export function useCustomAiProviders() {
             curl: "",
           });
           loadData(); // Refresh data
+        } else {
+          setErrors({ general: "Failed to save provider. Please try again." });
         }
       }
     } catch (error) {
       console.error("Error saving custom provider:", error);
+      setErrors({ general: "Failed to save provider. Please try again." });
     }
   };
 

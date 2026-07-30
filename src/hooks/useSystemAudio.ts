@@ -19,6 +19,7 @@ import {
   generateConversationId,
   generateMessageId,
   getProfileById,
+  PROFILE_UPDATED_EVENT,
   buildProfileKnowledgeContext,
   buildProfileBriefContext,
   loadProfileRefConvTexts,
@@ -81,6 +82,22 @@ interface ChatMessage {
   content: string;
   timestamp: number;
 }
+
+/**
+ * conversation.messages is stored newest-first (each turn is prepended as a
+ * [user, assistant] pair), but every LLM expects history oldest-first. Sending
+ * the raw array meant the model saw [Q3,A3,Q2,A2,Q1,A1] from the third turn
+ * onward, so follow-ups like "expand on that" resolved against the wrong turn.
+ *
+ * Sorting by timestamp rather than reversing is deliberate: a plain reverse
+ * would also flip each pair into [assistant, user]. The assistant message of a
+ * turn is always stamped timestamp+1 of its user message, so an ascending sort
+ * restores true chronological order.
+ */
+const toChronologicalHistory = (messages: ChatMessage[]): Message[] =>
+  [...messages]
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .map((msg) => ({ role: msg.role, content: msg.content }));
 
 // Conversation interface (reusing from useCompletion)
 export interface ChatConversation {
@@ -152,6 +169,23 @@ export function useSystemAudio() {
   const [useSystemPrompt, setUseSystemPrompt] = useState<boolean>(true);
   const [contextContent, setContextContent] = useState<string>("");
 
+  // Screenshot staged in the voice panel, to be sent with the next AI request.
+  // This lived as local state inside the speech panel component and was wired
+  // to nothing: every AI call here hardcoded `imagesBase64: []`, so the
+  // "Will be sent with next transcription" preview was a lie and the image was
+  // silently discarded. Owning it here is what lets processWithAI attach it.
+  const [pendingScreenshot, setPendingScreenshotState] = useState<string | null>(
+    null
+  );
+  const pendingScreenshotRef = useRef<string | null>(null);
+
+  const setPendingScreenshot = useCallback((base64: string | null) => {
+    // Ref kept in lockstep so processWithAI — which can be invoked from a
+    // long-lived event listener — always sees the current value.
+    pendingScreenshotRef.current = base64;
+    setPendingScreenshotState(base64);
+  }, []);
+
   const {
     selectedSttProvider,
     allSttProviders,
@@ -182,6 +216,29 @@ export function useSystemAudio() {
   // be routed by a still-stale ref from before the switch.
   const autoAnswerRef = useRef(captureMode === "vad");
   const autoAnswerFireRef = useRef<((question: string) => void) | null>(null);
+  // Holds a question that arrived while an answer was still streaming, so it
+  // can be answered once the pipeline frees up instead of being discarded.
+  const pendingAutoAnswerRef = useRef<string | null>(null);
+
+  // Live mirrors for the long-lived `speech-detected` listener. That effect
+  // deliberately re-registers rarely, so anything it calls must be read
+  // through a ref or it runs against whatever values existed when it last
+  // registered — the "changed the model mid-capture but the answer went to
+  // the old one" class of bug.
+  const conversationRef = useRef(conversation);
+  const processWithAIRef = useRef<
+    | ((
+        transcription: string,
+        prompt: string,
+        previousMessages: Message[],
+        segments?: { name: string; text: string }[]
+      ) => Promise<void>)
+    | null
+  >(null);
+  const buildEffectiveSystemPromptRef = useRef<
+    | (() => { text: string; segments: { name: string; text: string }[] })
+    | null
+  >(null);
 
   // Both Auto-detect ("vad") and Interview use the same continuous,
   // transcript-accumulating capture pipeline; only auto-answer differs. Manual
@@ -198,6 +255,10 @@ export function useSystemAudio() {
   useEffect(() => {
     interviewBufferTextRef.current = interviewBufferText;
   }, [interviewBufferText]);
+
+  useEffect(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
 
   useEffect(() => {
     selectedSttProviderRef.current = selectedSttProvider;
@@ -247,6 +308,38 @@ export function useSystemAudio() {
     };
   }, []);
 
+  // Bumped whenever any window reports a profile write, forcing the cached
+  // resume/JD context below to be refetched. Without this the context was
+  // loaded once per activeProfileId and never again — editing the resume in
+  // the Dashboard left the overlay answering from the stale (often empty)
+  // copy until an app restart.
+  const [profileReloadTick, setProfileReloadTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const fn = await listen<{ id: string }>(PROFILE_UPDATED_EVENT, () => {
+          setProfileReloadTick((tick) => tick + 1);
+        });
+        if (cancelled) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+      } catch (err) {
+        console.error("Failed to listen for profile updates:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   useEffect(() => {
     if (!activeProfileId) {
       activeProfileRef.current = null;
@@ -271,23 +364,25 @@ export function useSystemAudio() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeProfileId]);
+  }, [activeProfileId, profileReloadTick]);
 
   /** Prepends the active profile's knowledge context (brief, falling back to full) to the base system/context prompt. */
   const buildEffectiveSystemPrompt = useCallback((): {
     text: string;
     segments: { name: string; text: string }[];
   } => {
-    const isInterviewMode = captureMode === "interview";
-    const base = isInterviewMode
-      ? useCopilotPrompt
+    // Co-Pilot is offered in both live-capture modes (Auto-detect and
+    // Interview share the same continuous transcript pipeline — see
+    // usesInterviewPipeline above), not just Interview. Manual is a genuinely
+    // separate push-to-talk pipeline and keeps the plain system-prompt/context
+    // choice only.
+    const coPilotEligible = captureMode === "interview" || captureMode === "vad";
+    const base =
+      coPilotEligible && useCopilotPrompt
         ? INTERVIEW_COPILOT_PROMPT
         : useSystemPrompt
           ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-          : contextContent || DEFAULT_SYSTEM_PROMPT
-      : useSystemPrompt
-        ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-        : contextContent || DEFAULT_SYSTEM_PROMPT;
+          : contextContent || DEFAULT_SYSTEM_PROMPT;
     const profileCtx = profileBriefRef.current || profileContextRef.current;
     if (!profileCtx) {
       return { text: base, segments: [{ name: "base", text: base }] };
@@ -365,9 +460,31 @@ export function useSystemAudio() {
   useEffect(() => {
     if (!usesInterviewPipeline) return;
 
+    // `listen()` is async, so an effect that is torn down before it resolves
+    // would otherwise lose the unlisten handle entirely and leak the
+    // subscription for the process lifetime. Two live chunk listeners means
+    // every utterance is sent to STT twice and appended to the transcript
+    // twice. StrictMode's double-invoke reproduces this on every dev launch.
+    let cancelled = false;
+
     let unlistenChunk: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
     let unlistenStopped: (() => void) | undefined;
+
+    // Tears down anything already registered if the effect was cleaned up
+    // while an await was in flight. Must actually invoke the handles — simply
+    // bailing out would leave the subscription live with its handle
+    // unreachable, which is the leak this guard exists to prevent.
+    const abandonIfCancelled = () => {
+      if (!cancelled) return false;
+      unlistenChunk?.();
+      unlistenError?.();
+      unlistenStopped?.();
+      unlistenChunk = undefined;
+      unlistenError = undefined;
+      unlistenStopped = undefined;
+      return true;
+    };
 
     const setupListeners = async () => {
       try {
@@ -380,15 +497,18 @@ export function useSystemAudio() {
           // Process chunk through STT
           processChunk(payload.seq, payload.base64);
         });
+        if (abandonIfCancelled()) return;
 
         unlistenError = await listen("interview-capture-error", (event) => {
           const msg = event.payload as string;
           setError(`Interview capture error: ${msg}`);
         });
+        if (abandonIfCancelled()) return;
 
         unlistenStopped = await listen("interview-capture-stopped", () => {
           setInterviewCapturing(false);
         });
+        if (abandonIfCancelled()) return;
       } catch (err) {
         console.error("Failed to setup interview listeners:", err);
       }
@@ -518,6 +638,7 @@ export function useSystemAudio() {
     setupListeners();
 
     return () => {
+      cancelled = true;
       if (unlistenChunk) unlistenChunk();
       if (unlistenError) unlistenError();
       if (unlistenStopped) unlistenStopped();
@@ -529,11 +650,30 @@ export function useSystemAudio() {
 
   // Handle continuous recording progress events AND error events
   useEffect(() => {
+    // See the interview-pipeline effect above: async listen() + a cleanup that
+    // can run first = a permanently leaked subscription.
+    let cancelled = false;
+
     let progressUnlisten: (() => void) | undefined;
     let startUnlisten: (() => void) | undefined;
     let stopUnlisten: (() => void) | undefined;
     let errorUnlisten: (() => void) | undefined;
     let discardedUnlisten: (() => void) | undefined;
+
+    const abandonIfCancelled = () => {
+      if (!cancelled) return false;
+      progressUnlisten?.();
+      startUnlisten?.();
+      stopUnlisten?.();
+      errorUnlisten?.();
+      discardedUnlisten?.();
+      progressUnlisten = undefined;
+      startUnlisten = undefined;
+      stopUnlisten = undefined;
+      errorUnlisten = undefined;
+      discardedUnlisten = undefined;
+      return true;
+    };
 
     const setupContinuousListeners = async () => {
       try {
@@ -542,18 +682,21 @@ export function useSystemAudio() {
           const seconds = event.payload as number;
           setRecordingProgress(seconds);
         });
+        if (abandonIfCancelled()) return;
 
         // Recording started
         startUnlisten = await listen("continuous-recording-start", () => {
           setRecordingProgress(0);
           setIsRecordingInContinuousMode(true);
         });
+        if (abandonIfCancelled()) return;
 
         // Recording stopped
         stopUnlisten = await listen("continuous-recording-stopped", () => {
           setRecordingProgress(0);
           setIsRecordingInContinuousMode(false);
         });
+        if (abandonIfCancelled()) return;
 
         // Audio encoding errors
         errorUnlisten = await listen("audio-encoding-error", (event) => {
@@ -564,6 +707,7 @@ export function useSystemAudio() {
           setIsAIProcessing(false);
           setIsRecordingInContinuousMode(false);
         });
+        if (abandonIfCancelled()) return;
 
         // Speech discarded (too short)
         discardedUnlisten = await listen("speech-discarded", (event) => {
@@ -571,6 +715,7 @@ export function useSystemAudio() {
           console.log("Speech discarded:", reason);
           // Don't show error - this is expected behavior
         });
+        if (abandonIfCancelled()) return;
       } catch (err) {
         console.error("Failed to setup continuous recording listeners:", err);
       }
@@ -579,6 +724,7 @@ export function useSystemAudio() {
     setupContinuousListeners();
 
     return () => {
+      cancelled = true;
       if (progressUnlisten) progressUnlisten();
       if (startUnlisten) startUnlisten();
       if (stopUnlisten) stopUnlisten();
@@ -589,6 +735,11 @@ export function useSystemAudio() {
 
   // Handle single speech detection event (both VAD and continuous modes)
   useEffect(() => {
+    // Same async-listen leak guard as the two effects above. This effect
+    // re-registers on `capturing` and provider changes, so without it a
+    // start/stop faster than listen() resolves leaves a duplicate
+    // speech-detected handler transcribing every utterance twice.
+    let cancelled = false;
     let speechUnlisten: (() => void) | undefined;
 
     const setupEventListener = async () => {
@@ -647,13 +798,19 @@ export function useSystemAudio() {
                 setLastTranscription(transcription);
                 setError("");
 
-                const effectivePrompt = buildEffectiveSystemPrompt();
+                // Read through refs, not the effect's closure: the model,
+                // system prompt, custom context and co-pilot toggle can all
+                // change while capture is running, and this listener does not
+                // re-register when they do.
+                const effectivePrompt =
+                  buildEffectiveSystemPromptRef.current?.();
+                if (!effectivePrompt) return;
 
-                const previousMessages = conversation.messages.map((msg) => {
-                  return { role: msg.role, content: msg.content };
-                });
+                const previousMessages = toChronologicalHistory(
+                  conversationRef.current.messages
+                );
 
-                await processWithAI(
+                await processWithAIRef.current?.(
                   transcription,
                   effectivePrompt.text,
                   previousMessages,
@@ -677,6 +834,10 @@ export function useSystemAudio() {
             setIsProcessing(false);
           }
         });
+        if (cancelled) {
+          speechUnlisten?.();
+          speechUnlisten = undefined;
+        }
       } catch (err) {
         setError("Failed to setup speech listener");
       }
@@ -685,14 +846,13 @@ export function useSystemAudio() {
     setupEventListener();
 
     return () => {
+      cancelled = true;
       if (speechUnlisten) speechUnlisten();
     };
-  }, [
-    capturing,
-    selectedSttProvider,
-    allSttProviders,
-    conversation.messages.length,
-  ]);
+    // conversation.messages.length is intentionally gone: the handler now
+    // reads conversationRef, so re-registering on every message was pure
+    // listener churn (and a dropped-event window) for no benefit.
+  }, [capturing, selectedSttProvider, allSttProviders]);
 
   // Context management functions
   const saveContextSettings = useCallback(
@@ -766,13 +926,17 @@ export function useSystemAudio() {
 
     const effectivePrompt = buildEffectiveSystemPrompt();
 
-    // Include the most recent transcription in conversation history if it exists
-    let updatedMessages = [...conversation.messages];
+    // Include the most recent transcription in conversation history if it
+    // exists. Built oldest-first for the model; the pending transcription is
+    // the newest turn so it goes last, not first.
+    const previousMessages = toChronologicalHistory(conversation.messages);
 
     if (lastTranscription && lastTranscription.trim()) {
-      const lastMessage = updatedMessages[updatedMessages.length - 1];
-      // Only add if it's not already the last message
-      if (!lastMessage || lastMessage.content !== lastTranscription) {
+      // conversation.messages is newest-first, so the most recent message is
+      // at index 0 — the previous code checked the last element, which is the
+      // *oldest* message, and so effectively never deduped.
+      const newestMessage = conversation.messages[0];
+      if (!newestMessage || newestMessage.content !== lastTranscription) {
         const timestamp = Date.now();
         const userMessage = {
           id: generateMessageId("user", timestamp),
@@ -780,7 +944,10 @@ export function useSystemAudio() {
           content: lastTranscription,
           timestamp,
         };
-        updatedMessages.push(userMessage);
+        previousMessages.push({
+          role: userMessage.role,
+          content: userMessage.content,
+        });
 
         // Update conversation state with the latest transcription
         setConversation((prev) => ({
@@ -791,10 +958,6 @@ export function useSystemAudio() {
         }));
       }
     }
-
-    const previousMessages = updatedMessages.map((msg) => {
-      return { role: msg.role, content: msg.content };
-    });
 
     await processWithAI(action, effectivePrompt.text, previousMessages, effectivePrompt.segments);
   };
@@ -844,9 +1007,7 @@ export function useSystemAudio() {
 
         // conversation.messages is newest-first (prepended); the most recent
         // turn is [user, assistant, ...older] — drop it so the model doesn't see the question twice.
-        const history = conversation.messages
-          .slice(2)
-          .map((msg) => ({ role: msg.role, content: msg.content }));
+        const history = toChronologicalHistory(conversation.messages.slice(2));
 
         let fullResponse = "";
         for await (const chunk of fetchAIResponseWithFailover({
@@ -954,7 +1115,13 @@ export function useSystemAudio() {
         abortControllerRef.current.abort();
       }
 
-      abortControllerRef.current = new AbortController();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      // Must be threaded into the request below. Previously this controller was
+      // created and aborted by stopCapture/unmount but never actually handed to
+      // the fetch, so aborting did nothing: the stream kept running, kept
+      // pushing into setLastAIResponse, and still committed a turn to history.
+      const signal = controller.signal;
 
       try {
         setIsAIProcessing(true);
@@ -984,6 +1151,13 @@ export function useSystemAudio() {
         // one shot and stream normally from then on.
         let couldStillBeWait = true;
 
+        // Consume the staged screenshot exactly once: clear it up front so a
+        // failure or a follow-up question doesn't silently re-send the same
+        // image with a later, unrelated answer.
+        const staged = pendingScreenshotRef.current;
+        const images = staged ? [staged] : [];
+        if (staged) setPendingScreenshot(null);
+
         try {
           const failoverEnabled = getFailoverEnabled();
           const failoverChain = failoverEnabled
@@ -1004,9 +1178,11 @@ export function useSystemAudio() {
             segments,
             history: previousMessages,
             userMessage: transcription,
-            imagesBase64: [],
+            imagesBase64: images,
+            signal,
             _source: "audio",
           })) {
+            if (signal.aborted) return;
             fullResponse += chunk;
 
             if (couldStillBeWait) {
@@ -1025,12 +1201,15 @@ export function useSystemAudio() {
             }
           }
         } catch (aiError: any) {
+          if (signal.aborted) return;
           setError(
             `AI (${selectedAIProvider.provider}): ${
               aiError.message || "Failed to get AI response"
             }`
           );
         }
+
+        if (signal.aborted) return;
 
         const isWait = isWaitSentinel(fullResponse);
 
@@ -1065,8 +1244,22 @@ export function useSystemAudio() {
         // No auto-restart - user manually controls when to start next recording
       }
     },
-    [selectedAIProvider, allAiProviders, conversation.messages]
+    // providerVariables is read when building the failover chain above; without
+    // it here, rotating an API key mid-session kept sending the old one until
+    // some unrelated dep happened to change. conversation.messages is gone
+    // because the body never reads it — it only calls setConversation with an
+    // updater — so it was pure churn.
+    [selectedAIProvider, allAiProviders, providerVariables, setPendingScreenshot]
   );
+
+  // Keep the refs used by the long-lived `speech-detected` listener current.
+  useEffect(() => {
+    processWithAIRef.current = processWithAI;
+  }, [processWithAI]);
+
+  useEffect(() => {
+    buildEffectiveSystemPromptRef.current = buildEffectiveSystemPrompt;
+  }, [buildEffectiveSystemPrompt]);
 
   /** Fire the interview transcript buffer: flush chunk, assemble, call AI.
    * Works in both Auto-detect and Interview (the shared live pipeline); it's a
@@ -1129,10 +1322,7 @@ export function useSystemAudio() {
 
       // Step 6: call AI
       const effectivePrompt = buildEffectiveSystemPrompt();
-      const previousMessages = conversation.messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      }));
+      const previousMessages = toChronologicalHistory(conversation.messages);
 
       await processWithAI(
         questionText,
@@ -1168,17 +1358,23 @@ export function useSystemAudio() {
    * safety net. */
   const autoAnswerQuestion = useCallback(
     async (question: string) => {
+      if (!question.trim()) return;
+
       // Checks the ref, not the isAIProcessing state — see isAIProcessingRef's
       // declaration for why the state alone isn't a reliable synchronous guard.
-      if (!question.trim() || isAIProcessingRef.current) {
+      //
+      // A busy pipeline parks the question instead of discarding it. Dropping
+      // it outright meant a follow-up asked while the previous answer was
+      // still streaming vanished with no answer and no error. One slot only:
+      // if several land while busy, the newest is the one worth answering.
+      if (isAIProcessingRef.current) {
+        pendingAutoAnswerRef.current = question;
         return;
       }
+
       try {
         const effectivePrompt = buildEffectiveSystemPrompt();
-        const previousMessages = conversation.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+        const previousMessages = toChronologicalHistory(conversation.messages);
         setLastTranscription(question);
         await processWithAI(
           question,
@@ -1188,6 +1384,15 @@ export function useSystemAudio() {
         );
       } catch (err: any) {
         setError(err.message || "Failed to auto-answer");
+      } finally {
+        // processWithAI clears isAIProcessingRef in its own finally, which has
+        // already run by the time we get here, so the queued question can go
+        // straight through.
+        const pending = pendingAutoAnswerRef.current;
+        if (pending) {
+          pendingAutoAnswerRef.current = null;
+          autoAnswerFireRef.current?.(pending);
+        }
       }
     },
     // isAIProcessing intentionally omitted: the ref check above makes this
@@ -1262,17 +1467,17 @@ export function useSystemAudio() {
       // via the shared live pipeline. Manual uses continuous capture with VAD
       // gating disabled.
       const isContinuous = true;
+      // Manual (push-to-talk) needs VAD gating off for *this backend session*
+      // only. This used to also write enabled:false back into state and
+      // localStorage — a one-way latch, since the vad/interview branch returns
+      // before ever setting it back to true. Using Manual once permanently
+      // hid the Speech Sensitivity presets and VAD sliders in Settings (they
+      // render on vadConfig.enabled) and survived restarts. Keep the user's
+      // stored preference intact and pass the override only to Rust.
       const captureVadConfig = {
         ...vadConfig,
         enabled: false,
       };
-      if (captureVadConfig.enabled !== vadConfig.enabled) {
-        setVadConfig(captureVadConfig);
-        safeLocalStorage.setItem(
-          "vad_config",
-          JSON.stringify(captureVadConfig)
-        );
-      }
 
       // Set up conversation
       const conversationId = generateConversationId("sysaudio");
@@ -1349,6 +1554,7 @@ export function useSystemAudio() {
       }
 
       // Reset states
+      pendingAutoAnswerRef.current = null;
       setCapturing(false);
       setIsProcessing(false);
       setIsAIProcessing(false);
@@ -1737,5 +1943,8 @@ export function useSystemAudio() {
     clearInterviewBuffer,
     useCopilotPrompt,
     setUseCopilotPrompt,
+    // Screenshot staged for the next AI request
+    pendingScreenshot,
+    setPendingScreenshot,
   };
 }

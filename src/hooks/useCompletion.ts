@@ -1,7 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useWindowResize } from "./useWindow";
 import { useGlobalShortcuts } from "@/hooks";
-import { MAX_FILES } from "@/config";
+import {
+  MAX_FILES,
+  CONVERSATION_ATTACH_EVENT,
+  CONVERSATION_DELETED_EVENT,
+} from "@/config";
 import { useApp } from "@/contexts";
 import {
   fetchAIResponseWithFailover,
@@ -84,6 +88,24 @@ export const useCompletion = () => {
     currentConversationId: null,
     conversationHistory: [],
   });
+  // Synchronous mirror of state.currentConversationId. The cross-window
+  // delete listener registers once and must compare against the *current*
+  // id, not the one captured when it was registered.
+  // Synchronous re-entrancy guard for regenerate().
+  const isRegeneratingRef = useRef(false);
+  // Synchronous mirrors of the conversation identity. These are the source of
+  // truth for saveCurrentConversation (which claims them before awaiting) and
+  // for the cross-window delete listener (registered once, so it must not read
+  // a captured value).
+  const currentConversationIdRef = useRef<string | null>(null);
+  const conversationHistoryRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    currentConversationIdRef.current = state.currentConversationId;
+  }, [state.currentConversationId]);
+  useEffect(() => {
+    conversationHistoryRef.current = state.conversationHistory;
+  }, [state.conversationHistory]);
+
   const [micOpen, setMicOpen] = useState(false);
   const [enableVAD, setEnableVAD] = useState(false);
   const [messageHistoryOpen, setMessageHistoryOpen] = useState(false);
@@ -378,6 +400,11 @@ export const useCompletion = () => {
       state.attachedFiles,
       selectedAIProvider,
       allAiProviders,
+      // Used when building the failover chain. Typing normally refreshes this
+      // closure via state.input, so the gap only showed on the voice path:
+      // rotate a fallback provider's key, submit by speech without touching
+      // the input box, and the old key was still used.
+      providerVariables,
       systemPrompt,
       state.conversationHistory,
       buildEffectiveSystemPrompt,
@@ -397,7 +424,12 @@ export const useCompletion = () => {
     async (lengthId: string) => {
       const lastMsg = lastUserMessageRef.current;
       if (!lastMsg || !state.response) return;
-      if (state.isLoading) return;
+      // Ref, not state: two clicks landing in the same render both read the
+      // pre-update state.isLoading and both fired a real (billed) request,
+      // with the first one's partial text flickering into the panel before the
+      // second aborted it.
+      if (isRegeneratingRef.current || state.isLoading) return;
+      isRegeneratingRef.current = true;
 
       // Abort any in-flight request
       if (abortControllerRef.current) {
@@ -411,7 +443,12 @@ export const useCompletion = () => {
       const provider = allAiProviders.find(
         (p) => p.id === selectedAIProvider.provider
       );
-      if (!provider) return;
+      if (!provider) {
+        // Release the guard on this early exit too, or regenerate stays
+        // permanently wedged after one misconfigured attempt.
+        isRegeneratingRef.current = false;
+        return;
+      }
 
       const prevResponse = state.response;
       setState((prev) => ({
@@ -510,6 +547,8 @@ export const useCompletion = () => {
             response: prev.response || prevResponse,
           }));
         }
+      } finally {
+        isRegeneratingRef.current = false;
       }
     },
     [
@@ -556,6 +595,9 @@ export const useCompletion = () => {
   // are now imported from lib/database/chat-history.action.ts
 
   const loadConversation = useCallback((conversation: ChatConversation) => {
+    // Keep the synchronous mirrors in step — see startNewConversation.
+    currentConversationIdRef.current = conversation.id;
+    conversationHistoryRef.current = conversation.messages;
     setState((prev) => ({
       ...prev,
       currentConversationId: conversation.id,
@@ -568,6 +610,11 @@ export const useCompletion = () => {
   }, []);
 
   const startNewConversation = useCallback(() => {
+    // Reset the refs synchronously too — the effects that mirror state into
+    // them only run after the next render, and saveCurrentConversation reads
+    // the refs.
+    currentConversationIdRef.current = null;
+    conversationHistoryRef.current = [];
     setState((prev) => ({
       ...prev,
       currentConversationId: null,
@@ -592,8 +639,14 @@ export const useCompletion = () => {
         return;
       }
 
-      const conversationId =
-        state.currentConversationId || generateConversationId("chat");
+      // Read from refs, not state. This function awaits a DB write before its
+      // setState commits, so a second submit starting inside that window used
+      // to see currentConversationId === null and conversationHistory === []
+      // from its own stale closure — minting a *second* conversation holding
+      // only turn 2 and orphaning turn 1. Two half-conversations for one
+      // session.
+      const priorConversationId = currentConversationIdRef.current;
+      const conversationId = priorConversationId || generateConversationId("chat");
       const timestamp = Date.now();
 
       const userMsg: ChatMessage = {
@@ -610,22 +663,27 @@ export const useCompletion = () => {
         timestamp: timestamp + MESSAGE_ID_OFFSET,
       };
 
-      const newMessages = [...state.conversationHistory, userMsg, assistantMsg];
+      const priorHistory = conversationHistoryRef.current;
+      const newMessages = [...priorHistory, userMsg, assistantMsg];
+
+      // Claim the id and history synchronously, before any await, so a
+      // concurrent submit appends to this conversation instead of starting
+      // its own.
+      currentConversationIdRef.current = conversationId;
+      conversationHistoryRef.current = newMessages;
 
       // Get existing conversation if updating
       let existingConversation = null;
-      if (state.currentConversationId) {
+      if (priorConversationId) {
         try {
-          existingConversation = await getConversationById(
-            state.currentConversationId
-          );
+          existingConversation = await getConversationById(priorConversationId);
         } catch (error) {
           console.error("Failed to get existing conversation:", error);
         }
       }
 
       const title =
-        state.conversationHistory.length === 0
+        priorHistory.length === 0
           ? generateConversationTitle(userMessage)
           : existingConversation?.title ||
             generateConversationTitle(userMessage);
@@ -708,29 +766,63 @@ export const useCompletion = () => {
       }
     };
 
-    const handleStorageChange = async (e: StorageEvent) => {
-      if (e.key === "naukri-lelo-conversation-selected" && e.newValue) {
-        try {
-          const data = JSON.parse(e.newValue);
-          const { id } = data;
-          if (id && typeof id === "string") {
-            const conversation = await getConversationById(id);
-            if (conversation) {
-              loadConversation(conversation);
+    // Cross-window channel. The previous `storage`-event listener here could
+    // never fire: StorageEvent is not delivered between Tauri webview windows,
+    // and the History view that writes it lives in a different window from
+    // this overlay. Tauri listen() is the channel that actually works.
+    let cancelled = false;
+    let unlistenAttach: (() => void) | undefined;
+    let unlistenDeleted: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const attachFn = await listen<{ id: string }>(
+          CONVERSATION_ATTACH_EVENT,
+          async (event) => {
+            const id = event.payload?.id;
+            if (!id || typeof id !== "string") return;
+            try {
+              const conversation = await getConversationById(id);
+              if (conversation) loadConversation(conversation);
+            } catch (error) {
+              console.error("Failed to load attached conversation:", error);
             }
           }
-        } catch (error) {
-          console.error("Failed to parse conversation selection:", error);
+        );
+        if (cancelled) {
+          attachFn();
+          return;
         }
+        unlistenAttach = attachFn;
+
+        const deletedFn = await listen<{ id: string }>(
+          CONVERSATION_DELETED_EVENT,
+          (event) => {
+            // Must react even in another window: otherwise this overlay keeps
+            // the deleted id and its next save resurrects the conversation.
+            if (currentConversationIdRef.current === event.payload?.id) {
+              startNewConversation();
+            }
+          }
+        );
+        if (cancelled) {
+          deletedFn();
+          return;
+        }
+        unlistenDeleted = deletedFn;
+      } catch (error) {
+        console.error("Failed to set up conversation listeners:", error);
       }
-    };
+    })();
 
     window.addEventListener("conversationSelected", handleConversationSelected);
     window.addEventListener("newConversation", handleNewConversation);
     window.addEventListener("conversationDeleted", handleConversationDeleted);
-    window.addEventListener("storage", handleStorageChange);
 
     return () => {
+      cancelled = true;
+      unlistenAttach?.();
+      unlistenDeleted?.();
       window.removeEventListener(
         "conversationSelected",
         handleConversationSelected
@@ -740,13 +832,14 @@ export const useCompletion = () => {
         "conversationDeleted",
         handleConversationDeleted
       );
-      window.removeEventListener("storage", handleStorageChange);
     };
   }, [loadConversation, startNewConversation, state.currentConversationId]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const MAX_FILES = 6;
+    // Uses the imported MAX_FILES. A local `const MAX_FILES = 6` used to
+    // shadow it here — same value today, but a trap the moment the shared
+    // constant changes.
 
     files.forEach((file) => {
       if (
@@ -763,7 +856,11 @@ export const useCompletion = () => {
 
   const handleScreenshotSubmit = useCallback(
     async (base64: string, prompt?: string) => {
-      if (state.attachedFiles.length >= MAX_FILES) {
+      // Only the manual branch stages into attachedFiles; the auto branch
+      // (prompt set) passes the image straight to the request and never
+      // touches that list. Applying the cap to both meant that with 6 images
+      // already attached, the screenshot shortcut errored instead of working.
+      if (!prompt && state.attachedFiles.length >= MAX_FILES) {
         setState((prev) => ({
           ...prev,
           error: `You can only upload ${MAX_FILES} files`,
@@ -1219,10 +1316,19 @@ export const useCompletion = () => {
     };
   }, []);
 
+  // Drive both flags from a single "is voice input active?" decision rather
+  // than toggling each independently. They are set separately elsewhere
+  // (AutoSpeechVad sets enableVAD, the mic Popover's onOpenChange sets
+  // micOpen), so they can already disagree — and toggling each in turn from
+  // stale closure values could leave VAD listening and auto-submitting with
+  // the mic UI closed and no visible recording indicator.
   const toggleRecording = useCallback(() => {
-    setEnableVAD(!enableVAD);
-    setMicOpen(!micOpen);
-  }, [enableVAD, micOpen]);
+    setEnableVAD((prevVad) => {
+      const next = !(prevVad || micOpen);
+      setMicOpen(next);
+      return next;
+    });
+  }, [micOpen]);
 
   // Cleanup abort controller on unmount
   useEffect(() => {

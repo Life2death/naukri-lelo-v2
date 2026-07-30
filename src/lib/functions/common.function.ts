@@ -68,6 +68,20 @@ export function extractVariables(
 }
 
 /**
+ * Escapes `$` so a substituted value is treated as a literal by
+ * `String.prototype.replace`, which otherwise interprets `$$`, `$&`, `` $` ``
+ * and `$'` in the *replacement* string as special patterns.
+ *
+ * Without this, asking "what does `$&` do in sed?" sent the model the literal
+ * text `{{TEXT}}` as the question (`$&` expands to the matched placeholder),
+ * and any resume or JD containing `$$` (pricing tables) or `` $` `` (shell
+ * snippets) silently corrupted the profile context on every single request.
+ */
+export function escapeReplacement(value: string): string {
+  return value.replace(/\$/g, "$$$$");
+}
+
+/**
  * Recursively processes a user message template to replace placeholders for text and images.
  * @param template The user message template object.
  * @param userMessage The user's text message.
@@ -84,7 +98,7 @@ export function processUserMessageTemplate(
 
   const templateStr = JSON.stringify(template).replace(
     /\{\{TEXT\}\}/g,
-    escapeForJson(userMessage)
+    escapeReplacement(escapeForJson(userMessage))
   );
   const result = JSON.parse(templateStr);
 
@@ -176,7 +190,13 @@ export function deepVariableReplacer(
   if (typeof node === "string") {
     let result = node;
     for (const [key, value] of Object.entries(variables)) {
-      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
+      // escapeReplacement: SYSTEM_PROMPT / API_KEY / MODEL values routinely
+      // contain `$` (a resume with pricing figures, a prompt with shell
+      // examples) and would otherwise be mangled by replacement patterns.
+      result = result.replace(
+        new RegExp(`\\{\\{${key}\\}\\}`, "g"),
+        escapeReplacement(value ?? "")
+      );
     }
     return result;
   }

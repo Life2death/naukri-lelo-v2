@@ -78,18 +78,32 @@ export const QuickActions = ({
 
       {show && (
         <div className="flex flex-wrap gap-1.5 items-center">
+          {/* The chip is a <div>, not a <button>. A <button> nested inside a
+              <button> is invalid HTML: React logs a validateDOMNesting error
+              and the inner delete control's activation semantics are
+              browser-dependent. The outer chip only needs a click handler
+              (and keyboard access) when it is actually actionable. */}
           {actions.map((action) => (
-            <button
+            <div
               key={action}
-              type="button"
+              role={isManaging ? undefined : "button"}
+              tabIndex={isManaging ? undefined : 0}
               onClick={() => {
                 if (!isManaging) {
+                  onActionClick(action);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (isManaging) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
                   onActionClick(action);
                 }
               }}
               className={cn(
                 "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all",
                 "bg-primary/10 text-primary hover:bg-primary/20",
+                !isManaging && "cursor-pointer",
                 isManaging && "pr-1.5"
               )}
             >
@@ -97,6 +111,7 @@ export const QuickActions = ({
               {isManaging && (
                 <button
                   type="button"
+                  aria-label={`Remove ${action}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemoveAction(action);
@@ -106,7 +121,7 @@ export const QuickActions = ({
                   <Trash2Icon className="w-2.5 h-2.5" />
                 </button>
               )}
-            </button>
+            </div>
           ))}
 
           {isManaging && (

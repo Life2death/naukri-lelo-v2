@@ -19,6 +19,11 @@ export const ResponseQuickSettings = () => {
 
   useEffect(() => {
     sync();
+    // The `storage` listener stays for same-window writes but cannot see a
+    // change made in the Dashboard window — StorageEvent is not delivered
+    // across Tauri webviews. Re-syncing whenever this popover opens (below) is
+    // what actually keeps the label honest; without it the chip kept reading
+    // "Short" while requests were really being sent at a different length.
     window.addEventListener("storage", sync);
     window.addEventListener("response-settings-changed", sync);
     return () => {
@@ -36,7 +41,11 @@ export const ResponseQuickSettings = () => {
   const label = current?.title || "Short";
 
   return (
-    <Popover>
+    <Popover
+      onOpenChange={(open) => {
+        if (open) sync();
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant="ghost"

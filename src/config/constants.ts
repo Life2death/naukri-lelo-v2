@@ -35,6 +35,18 @@ export const STORAGE_KEYS = {
 } as const;
 
 // Maximum age for jobs shown in search results (days)
+/**
+ * Cross-window Tauri events (emit/listen).
+ *
+ * These deliberately do NOT use localStorage + the browser `storage` event.
+ * `storage` never fires in the window that performed the write, and is not
+ * delivered between separate Tauri/WebView2 windows at all — so any handoff
+ * between the Dashboard and the overlay built on it silently does nothing.
+ * Tauri's emit/listen is the only channel that actually crosses that boundary.
+ */
+export const CONVERSATION_ATTACH_EVENT = "conversation-attach-to-overlay";
+export const CONVERSATION_DELETED_EVENT = "conversation-deleted";
+
 export const JOB_MAX_AGE_DAYS = 5;
 // History retention window (days)
 export const JOB_HISTORY_RETENTION_DAYS = 7;
@@ -62,9 +74,9 @@ Line 1 — THE SPINE (this must be your very first output, nothing before it):
 **SAY:** <one short sentence the candidate can literally speak as their opening line — the direct answer / headline, first person, ≤20 words>
 
 Then — CUE LINES (bullet fragments, NOT prose):
-- 4–8 bullets. Each ≤10 words. **Bold** the load-bearing keyword(s) in each.
+- Cue count is set by the LENGTH TIERS section below — default to 4–8 ONLY if no length instruction appears anywhere else in this prompt chain. Each cue ≤10 words. **Bold** the load-bearing keyword(s) in each.
 - These are building blocks: phase names, real numbers, project names, the one metric to drop, the pivot phrase for a gap. The candidate builds sentences himself.
-- For behavioral questions, structure cues as: **Situation** (1 cue) → **Action** (2–3 cues, what *I* did) → **Result** (1 cue, real number only if one exists).
+- For behavioral questions, structure cues as: **Situation** (1 cue) → **Action** (2–3 cues, what *I* did) → **Result** (1 cue, real number only if one exists) — scale the Action cue count to fit whatever total the active tier allows.
 
 Last line (optional) — one coaching cue:
 ↳ <short delivery tip: "pause after each phase name", "name the AWS services", "don't over-explain">
@@ -74,11 +86,12 @@ HARD FORMAT RULES:
 - NO paragraphs. NO prose blocks. Nothing longer than one line per bullet.
 - Exception — if the transcript is garbled or the question seems cut off, prefix ONE bracket line: [Heard: <5-word gist> — if wrong, refire] then give your best-guess skeleton anyway. Never output only a request for clarification.
 
-## LENGTH TIERS
-If a response-length instruction appears elsewhere in this prompt chain, interpret it as CUE COUNT, never prose length:
-- Short → SAY line + 3–4 cues. Medium → SAY line + 5–6 cues.
+## LENGTH TIERS (authoritative — overrides the 4–8 default above whenever present)
+A response-length instruction elsewhere in this prompt chain is the CUE COUNT for this response, never prose length. Apply it exactly:
+- Short → SAY line + exactly 3–4 cues. Medium → SAY line + exactly 5–6 cues.
 - Long → SAY line + up to 8 cues, and for behavioral answers a fuller STAR block.
-- Auto → match cue count to question complexity.
+- Auto → match cue count to question complexity (roughly the Short–Medium range).
+Treat this tier as a hard ceiling/floor on the CUE LINES count above, not a suggestion.
 
 ## TRANSCRIPT HANDLING
 - The transcript is everything the interviewer said since the candidate's last answer. Ignore pleasantries and preamble; answer the final complete ask.
@@ -118,7 +131,7 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<string, string[]> = {
     "deepseek-r1-distill-llama-70b",
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-  claude: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"],
+  claude: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001", "claude-fable-5"],
   gemini: ["gemini-2.0-flash", "gemini-2.0-flash-lite"],
   grok: ["grok-2-1212"],
   mistral: ["mistral-large-latest", "mistral-small-latest"],
