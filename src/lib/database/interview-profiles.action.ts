@@ -1,5 +1,25 @@
+import { emit } from "@tauri-apps/api/event";
 import { getDatabase } from "./config";
 import { InterviewProfile, InterviewProfileDocument } from "@/types";
+
+/**
+ * Broadcast whenever a profile's contents change, so other windows can drop
+ * cached copies. Profiles live in SQLite, not localStorage, so there is no
+ * `storage` event to piggyback on — and `storage` isn't delivered between
+ * Tauri webview windows anyway. Tauri emit/listen is the only channel that
+ * actually crosses the Dashboard <-> overlay boundary.
+ */
+export const PROFILE_UPDATED_EVENT = "interview-profile-updated";
+
+const announceProfileChange = (id: string) => {
+  // Fire-and-forget: a failed (or absent, e.g. under test) event bus must
+  // never fail the write that just succeeded.
+  try {
+    void Promise.resolve(emit(PROFILE_UPDATED_EVENT, { id })).catch(() => {});
+  } catch {
+    // ignore
+  }
+};
 
 interface DbInterviewProfile {
   id: string;
@@ -58,6 +78,7 @@ export async function createProfile(profile: InterviewProfile): Promise<Intervie
     "INSERT INTO interview_profiles (id, name, resume_text, resume_file_name, goals, documents_json, brief_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [profile.id, profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.briefText || "", profile.createdAt, profile.updatedAt]
   );
+  announceProfileChange(profile.id);
   return profile;
 }
 
@@ -68,6 +89,7 @@ export async function updateProfile(profile: InterviewProfile): Promise<Intervie
     "UPDATE interview_profiles SET name = ?, resume_text = ?, resume_file_name = ?, goals = ?, documents_json = ?, brief_text = ?, updated_at = ? WHERE id = ?",
     [profile.name, profile.resumeText, profile.resumeFileName || "", profile.goals, documentsJson, profile.briefText || "", profile.updatedAt, profile.id]
   );
+  announceProfileChange(profile.id);
   return profile;
 }
 

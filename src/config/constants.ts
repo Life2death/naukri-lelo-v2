@@ -35,6 +35,18 @@ export const STORAGE_KEYS = {
 } as const;
 
 // Maximum age for jobs shown in search results (days)
+/**
+ * Cross-window Tauri events (emit/listen).
+ *
+ * These deliberately do NOT use localStorage + the browser `storage` event.
+ * `storage` never fires in the window that performed the write, and is not
+ * delivered between separate Tauri/WebView2 windows at all — so any handoff
+ * between the Dashboard and the overlay built on it silently does nothing.
+ * Tauri's emit/listen is the only channel that actually crosses that boundary.
+ */
+export const CONVERSATION_ATTACH_EVENT = "conversation-attach-to-overlay";
+export const CONVERSATION_DELETED_EVENT = "conversation-deleted";
+
 export const JOB_MAX_AGE_DAYS = 5;
 // History retention window (days)
 export const JOB_HISTORY_RETENTION_DAYS = 7;

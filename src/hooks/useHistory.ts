@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { emit } from "@tauri-apps/api/event";
 import {
   getAllConversations,
   deleteConversation,
   DOWNLOAD_SUCCESS_DISPLAY_MS,
 } from "@/lib";
+import {
+  CONVERSATION_ATTACH_EVENT,
+  CONVERSATION_DELETED_EVENT,
+} from "@/config";
 import { ChatConversation } from "@/types/completion";
 
 export type UseHistoryType = ReturnType<typeof useHistory>;
@@ -57,17 +62,43 @@ export function useHistory(): UseHistoryReturn {
   const [isDownloaded, setIsDownloaded] = useState(false);
   const [isAttached, setIsAttached] = useState(false);
 
+  // Tracks the newest refresh so two overlapping calls can't land out of
+  // order and leave the list showing the older result.
+  const refreshSeqRef = useRef(0);
+
+  // Timers scheduled for transient "Downloaded"/"Attached" badges, cleared on
+  // unmount so navigating away within the display window doesn't set state on
+  // an unmounted component.
+  const badgeTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      badgeTimersRef.current.forEach(clearTimeout);
+      badgeTimersRef.current.clear();
+    };
+  }, []);
+
+  const scheduleBadgeReset = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      badgeTimersRef.current.delete(id);
+      fn();
+    }, ms);
+    badgeTimersRef.current.add(id);
+  }, []);
+
   // Function to refresh conversations
   const refreshConversations = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     try {
       setIsLoading(true);
       const loadedConversations = await getAllConversations();
+      if (seq !== refreshSeqRef.current) return;
       setConversations(loadedConversations);
     } catch (error) {
       console.error("Failed to load conversations:", error);
-      setConversations([]);
+      if (seq === refreshSeqRef.current) setConversations([]);
     } finally {
-      setIsLoading(false);
+      if (seq === refreshSeqRef.current) setIsLoading(false);
     }
   }, []);
 
@@ -115,7 +146,7 @@ export function useHistory(): UseHistoryReturn {
     }
 
     // Clear success state after display timeout
-    setTimeout(() => {
+    scheduleBadgeReset(() => {
       setDownloadedConversations((prev) => {
         const newSet = new Set(prev);
         newSet.delete(conversation.id);
@@ -137,7 +168,12 @@ export function useHistory(): UseHistoryReturn {
       await deleteConversation(deleteConfirm);
       setConversations((prev) => prev.filter((c) => c.id !== deleteConfirm));
 
-      // Emit event to notify other components about deletion
+      // Notify other windows. This used to be a same-window CustomEvent, so
+      // the overlay never learned the conversation it was actively using had
+      // been deleted — it kept its stale currentConversationId and the next
+      // answer re-created the "deleted" row via saveConversation's
+      // read-then-insert upsert, resurrecting it with its history wiped.
+      emit(CONVERSATION_DELETED_EVENT, { id: deleteConfirm }).catch(() => {});
       window.dispatchEvent(
         new CustomEvent("conversationDeleted", {
           detail: deleteConfirm,
@@ -155,13 +191,15 @@ export function useHistory(): UseHistoryReturn {
   };
 
   const handleAttachToOverlay = (conversationId: string) => {
-    // Use localStorage to communicate between windows
-    localStorage.setItem(
-      "naukri-lelo-conversation-selected",
-      JSON.stringify({ id: conversationId, timestamp: Date.now() })
-    );
+    // Tauri emit, not localStorage: the `storage` event this previously
+    // relied on is not delivered across Tauri webview windows, so the overlay
+    // never received the conversation even though the button reported
+    // "Attached".
+    emit(CONVERSATION_ATTACH_EVENT, { id: conversationId }).catch((error) => {
+      console.error("Failed to attach conversation to overlay:", error);
+    });
     setIsAttached(true);
-    setTimeout(() => {
+    scheduleBadgeReset(() => {
       setIsAttached(false);
     }, DOWNLOAD_SUCCESS_DISPLAY_MS);
   };
@@ -173,7 +211,7 @@ export function useHistory(): UseHistoryReturn {
     if (conversation) {
       handleDownloadConversation(conversation, e);
       setIsDownloaded(true);
-      setTimeout(() => {
+      scheduleBadgeReset(() => {
         setIsDownloaded(false);
       }, DOWNLOAD_SUCCESS_DISPLAY_MS);
     }

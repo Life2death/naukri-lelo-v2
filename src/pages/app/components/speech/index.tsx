@@ -90,6 +90,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
     useCopilotPrompt,
     setUseCopilotPrompt,
     updateOverlayWindowSize,
+    pendingScreenshot: screenshotImage,
+    setPendingScreenshot: setScreenshotImage,
   } = props;
 
   const { supportsImages } = useApp();
@@ -117,8 +119,9 @@ export const SystemAudio = (props: useSystemAudioType) => {
     };
   }, []);
 
-  // Screenshot state
-  const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
+  // Screenshot state now lives in useSystemAudio (destructured above) so the
+  // captured image actually reaches the AI request. Keeping it local here is
+  // what made the feature a no-op.
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
   const isVadMode = captureMode === "vad";
@@ -146,8 +149,24 @@ export const SystemAudio = (props: useSystemAudioType) => {
         setConversationMode((prev) => !prev);
       }
 
-      // Enter to fire in interview mode (when panel is focused)
-      if (isInterviewMode && e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      // Enter to fire in interview mode (when panel is focused).
+      // Ignore Enter typed into a field — otherwise adding a quick action (or
+      // any other text entry in the panel) also fired an unwanted AI request
+      // and wiped the transcript buffer.
+      const target = e.target;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+
+      if (
+        isInterviewMode &&
+        !isTyping &&
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
         e.preventDefault();
         fireInterviewBuffer();
       }
@@ -157,12 +176,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen, isInterviewMode, fireInterviewBuffer]);
 
-  // Reset screenshot when processing starts (message is being sent)
-  useEffect(() => {
-    if (isProcessing && screenshotImage) {
-      setScreenshotImage(null);
-    }
-  }, [isProcessing, screenshotImage]);
+  // The staged screenshot is now cleared by processWithAI at the moment it is
+  // actually attached to a request. The old effect here cleared it on
+  // `isProcessing`, which Interview mode never sets (it uses isFireProcessing
+  // / isAIProcessing) — so in that mode the thumbnail stuck around forever.
 
   const handleToggleCapture = async () => {
     if (capturing || interviewCapturing) {

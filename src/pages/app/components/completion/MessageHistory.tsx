@@ -83,7 +83,12 @@ export const MessageHistory = ({
 
         <ScrollArea className="h-[calc(100vh-10rem)]">
           <div className="p-4 space-y-4">
+            {/* .slice() first: conversationHistory is state owned by
+                useCompletion, and Array.sort mutates in place — sorting it
+                directly here permanently reordered the caller's state during
+                render, changing what every other consumer sees. */}
             {conversationHistory
+              .slice()
               .sort((a, b) => b?.timestamp - a?.timestamp)
               .map((message) => (
                 <div

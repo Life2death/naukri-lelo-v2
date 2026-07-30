@@ -4,7 +4,7 @@ import { getAllProfiles } from "@/lib";
 import { useWindowResize } from "@/hooks";
 import { InterviewProfile } from "@/types";
 import { CheckIcon, UserCircle2Icon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export const ProfileSelector = () => {
   const { activeProfileId, setActiveProfileId } = useApp();
@@ -12,19 +12,28 @@ export const ProfileSelector = () => {
   const [open, setOpen] = useState(false);
   const { resizeWindow } = useWindowResize();
 
-  // Load profiles on first open (lazy) and expand the overlay window so the
-  // popover is not clipped by the 54 px default window height.
+  const loadProfiles = async () => {
+    try {
+      setProfiles(await getAllProfiles());
+    } catch {
+      setProfiles([]);
+    }
+  };
+
+  // Load once on mount as well as on open. Loading only on open left
+  // `activeProfile` null on startup even with a profile selected, so the
+  // trigger read "Select Interview Profile" instead of the active profile's
+  // name until the user happened to open the popover.
+  useEffect(() => {
+    void loadProfiles();
+  }, []);
+
+  // Refresh on open (lazy) and expand the overlay window so the popover is not
+  // clipped by the 54 px default window height.
   const handleOpen = async (val: boolean) => {
     setOpen(val);
     resizeWindow(val);
-    if (val) {
-      try {
-        const data = await getAllProfiles();
-        setProfiles(data);
-      } catch {
-        setProfiles([]);
-      }
-    }
+    if (val) await loadProfiles();
   };
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;

@@ -20,6 +20,22 @@ export interface PromptSegment {
   text: string;
 }
 
+/**
+ * Raised when a request fails. These used to be `yield`ed as ordinary content
+ * chunks, which meant callers could not distinguish an answer from a failure:
+ * the overlay rendered "API request failed: 401 ..." as the assistant's reply,
+ * left `state.error` null so no error UI appeared, and persisted that text to
+ * SQLite as a real conversation turn — after which it was fed back as context
+ * on every subsequent turn. Throwing keeps failures on the error path where
+ * callers already handle them.
+ */
+export class AIResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AIResponseError";
+  }
+}
+
 export const LENGTH_RULE_PRECEDENCE_CLAUSE =
   "The length rule above only governs how long a real answer should be. If any earlier instruction in this system prompt tells you not to answer, to stay silent, or to output a specific placeholder instead of an answer, follow that instruction instead — it always takes precedence over the length rule.";
 
@@ -248,10 +264,11 @@ export async function* fetchAIResponse(
       ) {
         return; // Silently return on abort
       }
-      yield `Network error during API request: ${
-        fetchError instanceof Error ? fetchError.message : "Unknown error"
-      }`;
-      return;
+      throw new AIResponseError(
+        `Network error during API request: ${
+          fetchError instanceof Error ? fetchError.message : "Unknown error"
+        }`
+      );
     }
 
     if (!response.ok) {
@@ -259,10 +276,11 @@ export async function* fetchAIResponse(
       try {
         errorText = await response.text();
       } catch {}
-      yield `API request failed: ${response.status} ${response.statusText}${
-        errorText ? ` - ${errorText}` : ""
-      }`;
-      return;
+      throw new AIResponseError(
+        `API request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${errorText}` : ""
+        }`
+      );
     }
 
     if (!provider?.streaming) {
@@ -270,10 +288,11 @@ export async function* fetchAIResponse(
       try {
         json = await response.json();
       } catch (parseError) {
-        yield `Failed to parse non-streaming response: ${
-          parseError instanceof Error ? parseError.message : "Unknown error"
-        }`;
-        return;
+        throw new AIResponseError(
+          `Failed to parse non-streaming response: ${
+            parseError instanceof Error ? parseError.message : "Unknown error"
+          }`
+        );
       }
       const content =
         getByPath(json, provider?.responseContentPath || "") || "";
@@ -282,11 +301,17 @@ export async function* fetchAIResponse(
     }
 
     if (!response.body) {
-      yield "Streaming not supported or response body missing";
-      return;
+      throw new AIResponseError(
+        "Streaming not supported or response body missing"
+      );
     }
 
     const reader = response.body.getReader();
+    // Guarantees the body is released on every exit path. The failover layer
+    // `break`s out of this generator when a provider fails, which triggers the
+    // generator's return path — without this finally, that leaked a reader and
+    // its connection for every fallback hop.
+    try {
     const decoder = new TextDecoder();
     let buffer = "";
     let capturedUsage: {
@@ -314,24 +339,37 @@ export async function* fetchAIResponse(
         ) {
           return; // Silently return on abort
         }
-        yield `Error reading stream: ${
-          readError instanceof Error ? readError.message : "Unknown error"
-        }`;
-        return;
+        throw new AIResponseError(
+          `Error reading stream: ${
+            readError instanceof Error ? readError.message : "Unknown error"
+          }`
+        );
       }
       const { done, value } = readResult;
-      if (done) break;
 
       // Check if aborted before processing
-      if (signal?.aborted) {
+      if (!done && signal?.aborted) {
         reader.cancel();
         return;
       }
 
-      buffer += decoder.decode(value, { stream: true });
+      // On the final read, flush the decoder (releases any multi-byte UTF-8
+      // sequence straddling the last chunk boundary) and treat whatever is
+      // left in `buffer` as a complete line. Previously this just `break`ed,
+      // silently discarding a provider's last SSE event when it closed the
+      // stream without a trailing newline — the tail of the answer went
+      // missing from both the display and the saved history.
+      let lines: string[];
+      if (done) {
+        buffer += decoder.decode();
+        lines = buffer.split("\n");
+        buffer = "";
+      } else {
+        buffer += decoder.decode(value, { stream: true });
+        lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+      }
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
       for (const line of lines) {
         if (line.startsWith("data:")) {
           const trimmed = line.substring(5).trim();
@@ -369,6 +407,8 @@ export async function* fetchAIResponse(
           }
         }
       }
+
+      if (done) break;
     }
 
     // Update capture with real usage if available
@@ -391,7 +431,17 @@ export async function* fetchAIResponse(
         promptCapture.notifyUsageUpdate(latest);
       }
     }
+    } finally {
+      // Runs on normal completion, on throw, and — critically — when the
+      // failover layer breaks out of this generator to try another provider.
+      reader.cancel().catch(() => {});
+    }
   } catch (error) {
+    // Preserve the typed failure so the failover layer can classify it and
+    // callers can tell a real error from an answer. Re-wrapping it in a plain
+    // Error here would erase that.
+    if (error instanceof AIResponseError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new Error(
       `Error in fetchAIResponse: ${
         error instanceof Error ? error.message : "Unknown error"

@@ -26,6 +26,10 @@ export const RecordingPanel = ({
 }: RecordingPanelProps) => {
   const isWorking = isProcessing || isAIProcessing;
 
+  // In Auto-detect mode this component has nothing to render, and returning
+  // the bordered wrapper anyway left a stray empty box above the results.
+  if (isVadMode) return null;
+
   return (
     <div className="rounded-lg border border-border/50 bg-muted/30 overflow-hidden">
       {/* Manual Mode */}

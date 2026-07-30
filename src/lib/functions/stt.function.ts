@@ -15,6 +15,12 @@ export interface STTParams {
     variables: Record<string, string>;
   };
   audio: File | Blob;
+  /**
+   * Cancels an in-flight transcription. Without this a request kept running
+   * after the user closed the mic or the component unmounted, and its result
+   * resolved into whichever caller still held the promise.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -24,7 +30,7 @@ export async function fetchSTT(params: STTParams): Promise<string> {
   let warnings: string[] = [];
 
   try {
-    const { provider, selectedProvider, audio } = params;
+    const { provider, selectedProvider, audio, signal } = params;
 
     if (!provider) throw new Error("Provider not provided");
     if (!selectedProvider) throw new Error("Selected provider not provided");
@@ -160,8 +166,14 @@ export async function fetchSTT(params: STTParams): Promise<string> {
         method: curlJson.method || "POST",
         headers: finalHeaders,
         body: curlJson.method === "GET" ? undefined : body,
+        signal,
       });
     } catch (e) {
+      // Let aborts propagate as aborts rather than being reported as a
+      // network failure the caller would surface as a real error.
+      if (signal?.aborted || (e instanceof Error && e.name === "AbortError")) {
+        throw e;
+      }
       throw new Error(`Network error: ${e instanceof Error ? e.message : e}`);
     }
 

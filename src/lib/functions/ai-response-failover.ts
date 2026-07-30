@@ -33,16 +33,12 @@ function isRetryableFailure(chunkOrError: string | Error): boolean {
   return false;
 }
 
-function isErrorChunk(chunk: string): boolean {
-  const lower = chunk.toLowerCase();
-  return (
-    lower.startsWith("network error") ||
-    lower.startsWith("api request failed") ||
-    lower.startsWith("streaming not supported") ||
-    lower.startsWith("error reading stream") ||
-    lower.startsWith("failed to parse")
-  );
-}
+// NOTE: the old `isErrorChunk` heuristic is gone. fetchAIResponse used to
+// signal failures by yielding them as ordinary content, so this layer had to
+// guess whether a chunk was an answer or an error by string-matching its
+// prefix — which also meant any answer that happened to begin with e.g.
+// "Network error..." was misread as a failure. Failures now arrive as thrown
+// AIResponseErrors and are handled in the catch below.
 
 export async function* fetchAIResponseWithFailover(
   params: FailoverParams
@@ -92,29 +88,16 @@ export async function* fetchAIResponseWithFailover(
     };
 
     try {
-      let yieldedContent = false;
-
       for await (const chunk of fetchAIResponse(attemptParams)) {
-        if (yieldedContent) {
-          yield chunk;
-          continue;
-        }
-
-        if (isErrorChunk(chunk)) {
-          if (isRetryableFailure(chunk) || alwaysFallOver) {
-            lastError = new Error(chunk);
-            break;
-          }
-          yield chunk;
-          return;
-        }
-
-        yieldedContent = true;
         hasYielded = true;
         yield chunk;
       }
 
-      if (yieldedContent) return;
+      // The attempt completed without throwing, so it succeeded — return even
+      // if it produced no tokens. Falling through on an empty-but-successful
+      // completion made a second, billed request to the next provider for an
+      // answer the first one had legitimately declined to give.
+      return;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       lastError = err;

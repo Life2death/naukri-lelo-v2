@@ -28,11 +28,16 @@ export function AudioVisualizer({ stream, isRecording }: AudioVisualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const oscillatorsRef = useRef<OscillatorNode[]>([]);
   const gainNodesRef = useRef<GainNode[]>([]);
+  const gainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup function to stop visualization and close audio context
   const cleanup = () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+    }
+    if (gainTimerRef.current) {
+      clearTimeout(gainTimerRef.current);
+      gainTimerRef.current = null;
     }
     // Stop all oscillators
     oscillatorsRef.current.forEach((osc) => {
@@ -124,9 +129,14 @@ export function AudioVisualizer({ stream, isRecording }: AudioVisualizerProps) {
     oscillatorsRef.current = oscillators;
     gainNodesRef.current = gainNodes;
 
-    // Animate the gain to simulate speech patterns
+    // Animate the gain to simulate speech patterns.
+    // Tracked in a ref and cancelled by cleanup(): this loop reschedules
+    // itself every 100ms and its `isRecording` check reads the value captured
+    // when the loop was created (always true), so nothing stopped it. A
+    // stop/start inside 100ms left an orphaned tick driving gain nodes that
+    // belonged to a closed AudioContext.
     const animateGain = () => {
-      if (!isRecording || !audioContextRef.current) return;
+      if (audioContextRef.current !== audioContext) return;
 
       gainNodes.forEach((gainNode, index) => {
         // Create random fluctuations to simulate speech
@@ -142,7 +152,7 @@ export function AudioVisualizer({ stream, isRecording }: AudioVisualizerProps) {
         );
       });
 
-      setTimeout(animateGain, 100);
+      gainTimerRef.current = setTimeout(animateGain, 100);
     };
 
     animateGain();
@@ -207,7 +217,11 @@ export function AudioVisualizer({ stream, isRecording }: AudioVisualizerProps) {
     if (!canvas || !ctx || !analyserRef.current) return;
 
     const dpr = window.devicePixelRatio || 1;
-    ctx.scale(dpr, dpr);
+    // setTransform, not scale: ctx.scale multiplies the *existing* transform,
+    // and nothing here resets it between runs. On a HiDPI display each
+    // stop/start cycle compounded the scale (2x, then 4x, ...) until the bars
+    // rendered clipped off-canvas.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const analyser = analyserRef.current;
     const bufferLength = analyser.frequencyBinCount;

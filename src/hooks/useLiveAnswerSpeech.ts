@@ -170,6 +170,10 @@ export const useLiveAnswerSpeech = (
       clearWatchdog();
       synth.resume();
       setIsPaused(false);
+      // Re-arm the TTS-echo mute: pauseHeld announced "not speaking" on
+      // release so capture could un-mute, so resuming has to announce
+      // "speaking" again or the resumed audio gets captured and re-transcribed.
+      announceSpeechState(true);
       const spokenText = cleanForSpeech(answer);
       const estimatedSpeechMs = (spokenText.length / 15 / settings.rate) * 1000;
       const watchdogMs = Math.min(Math.max(estimatedSpeechMs * 3, 15000), 120000);
@@ -193,8 +197,14 @@ export const useLiveAnswerSpeech = (
       clearWatchdog();
       synth.pause();
       setIsPaused(true);
+      // Critical: announce "not speaking" so useSystemAudio un-mutes capture.
+      // Without this the mute set on key-down is never lifted — and because a
+      // muted pipeline delivers no audio, no new answer is ever generated, so
+      // nothing else would ever call stop() to lift it either. The app goes
+      // permanently deaf until capture is manually restarted.
+      announceSpeechState(false);
     }
-  }, [supported]);
+  }, [announceSpeechState, supported]);
 
   const setEnabled = useCallback(
     (enabled: boolean) => {

@@ -249,12 +249,17 @@ describe("fetchAIResponse", () => {
     ).rejects.toThrow(/Failed to parse curl/i);
   });
 
-  it("yields error string on HTTP error (non-streaming path)", async () => {
+  it("throws on HTTP error instead of yielding it as content", async () => {
+    // Regression guard: this used to be `yield`ed as an ordinary chunk, so
+    // callers rendered "API request failed: 401 ..." as the assistant's answer
+    // and persisted it to history as a real conversation turn. Failures must
+    // stay on the error path.
     mockErrorResponse(401, "Unauthorized");
-    const chunks = await collectChunks(
-      fetchAIResponse({ provider: openAiProvider, selectedProvider, userMessage: "test" })
-    );
-    expect(chunks.join("")).toMatch(/API request failed.*401/i);
+    await expect(
+      collectChunks(
+        fetchAIResponse({ provider: openAiProvider, selectedProvider, userMessage: "test" })
+      )
+    ).rejects.toThrow(/API request failed.*401/i);
   });
 
   // ── Abort signal ────────────────────────────────────────────────────────
