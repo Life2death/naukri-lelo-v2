@@ -4,6 +4,9 @@ import {
   getAllSystemPrompts,
   updateSystemPrompt,
   deleteSystemPrompt,
+  getAppSettingWithLocalStorageFallback,
+  setAppSetting,
+  APP_SETTING_KEYS,
 } from "@/lib/database";
 import type {
   SystemPrompt,
@@ -19,14 +22,32 @@ export const useSystemPrompts = () => {
   const [prompts, setPrompts] = useState<SystemPrompt[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPromptId, setSelectedPromptId] = useState<number | null>(
-    () => {
-      const stored = safeLocalStorage.getItem(
+  // Which prompt is selected now lives in SQLite, not localStorage. The
+  // prompt library was always in SQLite (so shared between a dev build and a
+  // production build), but the selection was in localStorage — which the
+  // webview partitions by origin, and dev (http://localhost:1420) and prod
+  // (http://tauri.localhost) are different origins. The result was that both
+  // builds showed the same prompts but only one of them had any selected,
+  // with the other silently falling back to DEFAULT_SYSTEM_PROMPT.
+  const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
+
+  // Load the persisted selection (adopting any pre-existing localStorage
+  // value on first run) before the prompt list resolves.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = await getAppSettingWithLocalStorageFallback(
+        APP_SETTING_KEYS.SELECTED_SYSTEM_PROMPT_ID,
         STORAGE_KEYS.SELECTED_SYSTEM_PROMPT_ID
       );
-      return stored ? Number(stored) : null;
-    }
-  );
+      if (cancelled || !stored) return;
+      const parsed = Number(stored);
+      if (Number.isFinite(parsed)) setSelectedPromptId(parsed);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Fetch all system prompts from database
@@ -157,6 +178,7 @@ export const useSystemPrompts = () => {
       } else {
         // Selected prompt was deleted, reset to default
         setSelectedPromptId(null);
+        void setAppSetting(APP_SETTING_KEYS.SELECTED_SYSTEM_PROMPT_ID, null);
         safeLocalStorage.removeItem(STORAGE_KEYS.SELECTED_SYSTEM_PROMPT_ID);
         const currentPrompt = safeLocalStorage.getItem(
           STORAGE_KEYS.SYSTEM_PROMPT
@@ -181,9 +203,16 @@ export const useSystemPrompts = () => {
       if (selectedPrompt) {
         setSystemPrompt(selectedPrompt.prompt);
         setSelectedPromptId(promptId);
+        // SYSTEM_PROMPT stays in localStorage: it's a per-origin cache of the
+        // active prompt text that the overlay window reads at startup. The
+        // *selection* is the shared source of truth and goes to SQLite.
         safeLocalStorage.setItem(
           STORAGE_KEYS.SYSTEM_PROMPT,
           selectedPrompt.prompt
+        );
+        void setAppSetting(
+          APP_SETTING_KEYS.SELECTED_SYSTEM_PROMPT_ID,
+          promptId.toString()
         );
         safeLocalStorage.setItem(
           STORAGE_KEYS.SELECTED_SYSTEM_PROMPT_ID,
