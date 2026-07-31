@@ -260,6 +260,34 @@ export function useSystemAudio() {
     conversationRef.current = conversation;
   }, [conversation]);
 
+  // Immediately persists whatever the debounced save effect further below
+  // still has queued. Without this, stopping capture, restarting it, or the
+  // component unmounting races the 500ms debounce: its pending setTimeout
+  // gets cancelled by that effect's own cleanup and the last fired Q&A is
+  // silently never written to SQLite, even though it was on screen a moment
+  // earlier — this was the cause of interview-mode answers going missing
+  // from Chats.
+  const flushPendingConversationSave = useCallback(() => {
+    if (!saveTimeoutRef.current) return;
+    clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+
+    const pending = conversationRef.current;
+    if (!pending.id || pending.updatedAt === 0 || pending.messages.length === 0) {
+      return;
+    }
+    if (isSavingRef.current) return;
+
+    isSavingRef.current = true;
+    saveConversation(pending)
+      .catch((error) => {
+        console.error("Failed to flush pending conversation save:", error);
+      })
+      .finally(() => {
+        isSavingRef.current = false;
+      });
+  }, []);
+
   useEffect(() => {
     selectedSttProviderRef.current = selectedSttProvider;
   }, [selectedSttProvider]);
@@ -1412,6 +1440,9 @@ export function useSystemAudio() {
   const startCapture = useCallback(async (mode: CaptureMode = captureMode) => {
     try {
       setError("");
+      // Flush before stomping `conversation` below — otherwise restarting
+      // capture within 500ms of the last answer silently drops it.
+      flushPendingConversationSave();
 
       // Both Auto-detect ("vad") and Interview use the continuous,
       // transcript-accumulating capture pipeline. They differ only in whether
@@ -1519,7 +1550,7 @@ export function useSystemAudio() {
       setError(errorMessage);
       setIsPopoverOpen(true);
     }
-  }, [captureMode, vadConfig, selectedAudioDevices.output.id]);
+  }, [captureMode, vadConfig, selectedAudioDevices.output.id, flushPendingConversationSave]);
 
   const stopCapture = useCallback(async (
     keepPopoverOpen = false,
@@ -1530,6 +1561,10 @@ export function useSystemAudio() {
     preserveResponse = false
   ) => {
     try {
+      // Persist any answer still waiting out its debounce before capture
+      // actually stops.
+      flushPendingConversationSave();
+
       // Abort any ongoing AI requests
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -1572,7 +1607,7 @@ export function useSystemAudio() {
       setError(`Failed to stop capture: ${errorMessage}`);
       console.error("Stop capture error:", err);
     }
-  }, [captureMode]);
+  }, [captureMode, flushPendingConversationSave]);
 
   // Manual stop for continuous recording
   const manualStopAndSend = useCallback(async () => {
@@ -1717,10 +1752,11 @@ export function useSystemAudio() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      flushPendingConversationSave();
       invoke("stop_system_audio_capture").catch(() => {});
       invoke("stop_interview_capture").catch(() => {});
     };
-  }, []);
+  }, [flushPendingConversationSave]);
 
   // Debounced save to prevent race conditions and improve performance
   useEffect(() => {
@@ -1740,6 +1776,10 @@ export function useSystemAudio() {
 
     // Debounce saves (only save 500ms after last change)
     saveTimeoutRef.current = setTimeout(async () => {
+      // Timer has now fired — nothing left for flushPendingConversationSave
+      // to pre-empt, so clear the ref before doing anything else below.
+      saveTimeoutRef.current = null;
+
       // Don't save if already saving (prevent concurrent saves)
       if (isSavingRef.current) {
         return;

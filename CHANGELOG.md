@@ -95,6 +95,18 @@ src/
 
 ## Release history
 
+### Unreleased
+
+- 🐛 **Fix: Interview mode answers could still go missing from Chats.** The
+  v9.0.0 fix seeded a `conversation.id` for Auto-detect/Interview so the
+  debounced save could run at all, but the save itself still only fired
+  500ms after the last change, and nothing flushed it early. Stopping
+  capture, restarting it, or closing the app within that window silently
+  cancelled the pending save via the save effect's own cleanup — dropping
+  the most recent (often the only) fired answer with no error shown.
+  `stopCapture`, `startCapture`, and unmount now flush any pending save
+  immediately via a new `flushPendingConversationSave`.
+
 ### v9.1.0 (July 30 2026)
 
 - 🐛 **Fix: TTS mute deadlock.** Releasing the hold-to-read-answer key
