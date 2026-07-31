@@ -95,7 +95,7 @@ src/
 
 ## Release history
 
-### Unreleased
+### v9.1.1 (July 31 2026)
 
 - 🐛 **Fix: Interview mode answers could still go missing from Chats.** The
   v9.0.0 fix seeded a `conversation.id` for Auto-detect/Interview so the
@@ -106,6 +106,8 @@ src/
   the most recent (often the only) fired answer with no error shown.
   `stopCapture`, `startCapture`, and unmount now flush any pending save
   immediately via a new `flushPendingConversationSave`.
+- 🔖 Version bumped to 9.1.1 across `package.json`, `tauri.conf.json`,
+  `Cargo.toml`, and `Cargo.lock`.
 
 ### v9.1.0 (July 30 2026)
 
